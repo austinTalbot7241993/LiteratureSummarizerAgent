@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: lea_postgres
+    environment:
+      POSTGRES_USER: lea_user
+      POSTGRES_PASSWORD: lea_pass
+      POSTGRES_DB: lea_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lea_user -d lea_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  grobid:
+    image: grobid/grobid:0.8.0
+    container_name: lea_grobid
+    ports:
+      - "8070:8070"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8070/api/isalive || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
