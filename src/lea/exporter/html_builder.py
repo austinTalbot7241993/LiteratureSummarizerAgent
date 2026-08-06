@@ -20,7 +20,8 @@ class HTMLReportExporter:
         repo: LEARepository,
         run_id,
         output_filepath: str,
-        title: str = "Literature Exploration Report"
+        title: str = "Literature Exploration Report",
+        include_abstract_only: bool = False
     ) -> str:
         run = repo.get_discovery_run(run_id)
         if not run:
@@ -33,6 +34,9 @@ class HTMLReportExporter:
         for cand in candidates:
             paper = cand.paper
             summary = cand.summary
+
+            if not cand.is_downloaded and not include_abstract_only:
+                continue
 
             paper_dict = {
                 "id": str(paper.id),

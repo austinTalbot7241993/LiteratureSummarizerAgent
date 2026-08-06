@@ -11,7 +11,7 @@ Your JSON response MUST match this exact schema:
 CRITICAL RULES:
 1. "paragraph_summary" MUST be a SINGLE PARAGRAPH without any newline characters.
 2. "paragraph_summary" MUST contain AT MOST 300 words.
-3. Do not include markdown code block formatting (like ```json) in your output; output valid raw JSON only.
+3. Output valid raw JSON only, starting with '{' and ending with '}'. Do not include markdown code block formatting or intro text.
 """
 
 SUMMARY_USER_PROMPT_TEMPLATE = """Paper Title: {title}
@@ -21,5 +21,5 @@ Publication Year: {year}
 Retrieved Context Chunks:
 {context_text}
 
-Provide the technical summary JSON object following the required schema:
+Provide the technical summary JSON object following the required schema (JSON ONLY):
 """

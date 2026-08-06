@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# LEA Generated Reports and Logs
+*.html
+lea_run.log

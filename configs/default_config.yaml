@@ -6,7 +6,7 @@ application:
   max_retries: 4
 
 services:
-  database_url: ${LEA_DATABASE_URL}
+  database_url: ${LEA_DATABASE_URL:-postgresql://lea_user:lea_pass@localhost:5433/lea_db}
   grobid_url: ${LEA_GROBID_URL:-http://localhost:8070}
   openalex_api_key: ${OPENALEX_API_KEY}
   semantic_scholar_api_key: ${SEMANTIC_SCHOLAR_API_KEY:-}
@@ -31,13 +31,14 @@ discovery:
 
 acquisition:
   download_open_access_pdfs: true
+  require_downloaded_pdf: true
   max_pdf_bytes: 104857600
   allowed_content_types:
     - application/pdf
   user_agent: "LEA/0.1 scholarly-research-agent"
 
 chunking:
-  tokenizer_model: Qwen/Qwen2.5-7B-Instruct
+  tokenizer_model: BAAI/bge-m3
   parent_tokens: 768
   parent_overlap_tokens: 96
   child_tokens: 256
@@ -78,6 +79,6 @@ llm:
 
 report:
   title: Literature Exploration Report
-  include_abstract_only_results: true
+  include_abstract_only_results: false
   include_retrieval_provenance: true
   include_bibtex: true

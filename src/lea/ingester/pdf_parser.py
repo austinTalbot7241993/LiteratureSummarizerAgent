@@ -29,9 +29,25 @@ class PDFParser:
             for page in doc:
                 full_text.append(page.get_text())
             doc.close()
-            return "\n".join(full_text)
+            full_str = "\n".join(full_text)
+            return full_str.replace("\x00", "").replace("\u0000", "")
         except Exception as exc:
             raise IngestError(f"Failed to extract text using PyMuPDF: {exc}")
+
+    def extract_body_text(self) -> str:
+        text = self.extract_text()
+        lines = text.splitlines()
+        halfway = len(lines) // 2
+        ref_pattern = re.compile(
+            r"^\s*(?:[0-9.]+\s*)?(?:references|ref\s*er\s*en\s*ces|bibliography|works cited|data availability|code availability|supplementary information|author contributions|competing interests)\s*$",
+            re.IGNORECASE
+        )
+
+        for i in range(halfway, len(lines)):
+            if ref_pattern.match(lines[i].strip()):
+                logger.info(f"Stripped back-matter section ('{lines[i].strip()}') starting at line {i}/{len(lines)}")
+                return "\n".join(lines[:i])
+        return text
 
     def parse_fallback_metadata(self) -> Dict[str, Any]:
         text = self.extract_text()

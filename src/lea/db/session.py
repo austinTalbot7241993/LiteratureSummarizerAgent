@@ -10,7 +10,9 @@ _SessionLocal = None
 
 def init_db(database_url: str):
     global _engine, _SessionLocal
-    # Handle SQLite for testing if database_url is sqlite
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
     is_sqlite = database_url.startswith("sqlite")
     connect_args = {"check_same_thread": False} if is_sqlite else {}
 
@@ -21,8 +23,9 @@ def init_db(database_url: str):
 def get_engine():
     global _engine
     if _engine is None:
-        db_url = os.getenv("LEA_DATABASE_URL", "postgresql://lea_user:lea_pass@localhost:5432/lea_db")
-        init_db(db_url)
+        from lea.config import load_config
+        cfg = load_config()
+        init_db(cfg.services.database_url)
     return _engine
 
 def get_session_factory():

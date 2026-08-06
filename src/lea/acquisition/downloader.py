@@ -7,12 +7,16 @@ from lea.exceptions import AcquisitionError
 from lea.logging import logger
 
 class PDFDownloader:
-    def __init__(self, cache_dir: str = ".cache/lea/pdfs", max_pdf_bytes: int = 104857600, user_agent: str = "LEA/0.1 scholarly-research-agent"):
+    def __init__(self, cache_dir: str = ".cache/lea/pdfs", max_pdf_bytes: int = 104857600, user_agent: str = "LEA/0.1 scholarly-research-agent", unpaywall_email: Optional[str] = None):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_pdf_bytes = max_pdf_bytes
         self.user_agent = user_agent
-        self.oa_resolver = OpenAccessResolver()
+        self.oa_resolver = OpenAccessResolver(unpaywall_email=unpaywall_email)
+        if unpaywall_email:
+            logger.info(f"Unpaywall resolution enabled with email: {unpaywall_email}")
+        else:
+            logger.warning("Unpaywall email not set — OA resolution limited to oa_pdf_url and arXiv IDs only.")
 
     async def download_candidate_pdf(self, candidate_meta: Dict[str, Any]) -> Optional[str]:
         oa_url = await self.oa_resolver.resolve_oa_url(candidate_meta)

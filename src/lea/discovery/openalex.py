@@ -96,6 +96,27 @@ class OpenAlexClient:
             logger.warning(f"OpenAlex find_related_candidates error: {exc}")
             return []
 
+    async def search_candidates(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        await self._rate_limit()
+        import urllib.parse
+        encoded_query = urllib.parse.quote_plus(query)
+        url = f"https://api.openalex.org/works?search={encoded_query}&per-page={min(limit, 50)}"
+        params = {}
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                res = await client.get(url, params=params)
+                if res.status_code == 200:
+                    results = res.json().get("results", [])
+                    return [self._parse_work(w) for w in results]
+                return []
+        except Exception as exc:
+            logger.warning(f"OpenAlex search_candidates error: {exc}")
+            return []
+
+
     def _parse_work(self, item: Dict[str, Any]) -> Dict[str, Any]:
         openalex_id = item.get("id", "").split("/")[-1] if item.get("id") else None
         doi = item.get("doi")

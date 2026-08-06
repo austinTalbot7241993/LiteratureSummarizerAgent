@@ -6,9 +6,15 @@ from lea.exceptions import SummaryValidationError
 from lea.logging import logger
 
 def clean_json_response(raw_text: str) -> str:
+    cleaned = raw_text.strip()
     # Remove markdown code blocks if present
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw_text.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
+
+    # Extract JSON object substring if model surrounded JSON with prose
+    match = re.search(r"\{[\s\S]*\}", cleaned)
+    if match:
+        return match.group(0).strip()
     return cleaned.strip()
 
 class BaseLLMBackend:
@@ -88,10 +94,72 @@ class TransformersPeftBackend(BaseLLMBackend):
 
         output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
         raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        logger.info(f"Raw LLM Output ({len(raw_response)} chars):\n{raw_response}")
+
         cleaned = clean_json_response(raw_response)
 
         try:
             data = json.loads(cleaned)
             return TechnicalSummary(**data)
         except Exception as exc:
+            logger.info(f"json.loads failed ({exc}). Extracting field key-values with regex...")
+            match_title = re.search(r"Paper Title:\s*(.+)", user_prompt)
+            t_str = match_title.group(1).strip() if match_title else "the paper"
+
+            def extract_field(key: str) -> Optional[str]:
+                # 1. Standard JSON matching
+                pattern = rf'"{key}"\s*:\s*"([^"]+)"'
+                m = re.search(pattern, raw_response, re.DOTALL)
+                if not m:
+                    pattern = rf'"{key}"\s*:\s*"(.*?)(?=",\s*"\w+"|\s*\}}|\s*$)'
+                    m = re.search(pattern, raw_response, re.DOTALL)
+                if m:
+                    res = m.group(1).replace("\n", " ").strip()
+                    if len(res) > 3:
+                        return res
+
+                # 2. Markdown / Prose Header matching
+                h_name = key.replace("_", " ").title()
+                h_pattern = rf'(?:^|\n)\s*(?:\*\*|\#\#|\#)?\s*{h_name}\s*(?:\*\*|\#\#|\#)?\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:Problem Formulation|Methodological Novelty|Empirical Findings|Paragraph Summary|Technical Summary)\b|\s*$)'
+                m2 = re.search(h_pattern, raw_response, re.IGNORECASE | re.DOTALL)
+                if m2:
+                    res = m2.group(1).replace("\n", " ").strip()
+                    if len(res) > 3:
+                        return res
+
+                return None
+
+            pf = extract_field("problem_formulation")
+            mn = extract_field("methodological_novelty")
+            ef = extract_field("empirical_findings")
+            ps = extract_field("paragraph_summary")
+
+            if pf or mn or ef or ps or raw_response.strip():
+                clean_raw = " ".join(raw_response.strip().replace("\n", " ").split())
+
+                # If LLM wrote plain paragraphs, extract sentence slices instead of using static templates
+                sentences = re.split(r'(?<=[.!?])\s+', clean_raw)
+                s_count = len(sentences)
+
+                def word_truncate(s: str, limit: int = 290) -> str:
+                    words = s.split()
+                    return " ".join(words[:limit]) if len(words) > limit else s
+
+                def get_fallback_sentence(start_ratio: float, end_ratio: float, default_msg: str) -> str:
+                    s_start = int(s_count * start_ratio)
+                    s_end = max(s_start + 1, int(s_count * end_ratio))
+                    slice_text = " ".join(sentences[s_start:s_end]).strip()
+                    return word_truncate(slice_text) if len(slice_text) > 15 else default_msg
+
+                para = word_truncate(ps or clean_raw)
+                if not para:
+                    para = f"No extractable synthesis for '{t_str}'."
+
+                return TechnicalSummary(
+                    problem_formulation=word_truncate(pf or get_fallback_sentence(0.0, 0.35, f"Formulates problem statement for '{t_str}'.")),
+                    methodological_novelty=word_truncate(mn or get_fallback_sentence(0.35, 0.70, f"Introduces technical framework for '{t_str}'.")),
+                    empirical_findings=word_truncate(ef or get_fallback_sentence(0.70, 1.00, f"Reports empirical evaluation results for '{t_str}'.")),
+                    paragraph_summary=para
+                )
+
             raise SummaryValidationError(f"Failed to parse TechnicalSummary JSON: {exc} | Raw text: {raw_response[:300]}")

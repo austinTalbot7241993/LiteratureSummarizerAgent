@@ -262,7 +262,8 @@ def acquire(run_id: str = typer.Argument(..., help="Discovery run UUID")):
         downloader = PDFDownloader(
             cache_dir=config.application.cache_dir + "/pdfs",
             max_pdf_bytes=config.acquisition.max_pdf_bytes,
-            user_agent=config.acquisition.user_agent
+            user_agent=config.acquisition.user_agent,
+            unpaywall_email=config.services.unpaywall_email or None
         )
 
         downloaded_count = 0
@@ -323,12 +324,19 @@ def index(run_id: str = typer.Argument(..., help="Discovery run UUID")):
         total_chunks = 0
         for cand in candidates:
             p = cand.paper
-            text_content = p.abstract or p.title
-            if cand.pdf_path and os.path.exists(cand.pdf_path):
+            if not (cand.pdf_path and os.path.exists(cand.pdf_path)):
+                if config.acquisition.require_downloaded_pdf:
+                    logger.info(f"Skipping indexing for '{p.title}' - no downloaded PDF available (require_downloaded_pdf=True)")
+                    continue
+                text_content = p.abstract or p.title
+            else:
                 try:
-                    text_content = PDFParser(cand.pdf_path).extract_text()
+                    text_content = PDFParser(cand.pdf_path).extract_body_text()
                 except Exception as exc:
                     logger.warning(f"Could not extract PDF text for {p.title}: {exc}")
+                    if config.acquisition.require_downloaded_pdf:
+                        continue
+                    text_content = p.abstract or p.title
 
             chunk_objs = chunker.chunk_text(text_content)
             child_contents = [c["content"] for c in chunk_objs if c["chunk_type"] == "child"]
@@ -366,7 +374,10 @@ def index(run_id: str = typer.Argument(..., help="Discovery run UUID")):
 
 
 @app.command()
-def summarize(run_id: str = typer.Argument(..., help="Discovery run UUID")):
+def summarize(
+    run_id: str = typer.Argument(..., help="Discovery run UUID"),
+    allow_mock: bool = typer.Option(False, "--mock", help="Allow mock LLM backend fallback for testing without GPU")
+):
     """Generates structured technical summaries using hybrid retrieval and Qwen 2.5 7B."""
     config = load_config()
     setup_logging(config.application.log_level)
@@ -392,34 +403,59 @@ def summarize(run_id: str = typer.Argument(..., help="Discovery run UUID")):
         hybrid_engine = HybridSearchEngine(dense_engine, rrf_k=config.retrieval.rrf_k)
 
         # Select backend
-        try:
-            import torch
-            if torch.cuda.is_available() and config.llm.device == "cuda":
-                backend = TransformersPeftBackend(
-                    model_name=config.llm.model,
-                    adapter_path=config.llm.adapter_path,
-                    max_context_tokens=config.llm.max_context_tokens
-                )
-            else:
-                backend = MockLLMBackend()
-        except Exception:
+        import torch
+        if torch.cuda.is_available() and config.llm.device == "cuda":
+            backend = TransformersPeftBackend(
+                model_name=config.llm.model,
+                adapter_path=config.llm.adapter_path,
+                max_context_tokens=config.llm.max_context_tokens
+            )
+        elif allow_mock:
+            console.print("[bold yellow]WARNING: Using MockLLMBackend because --mock was explicitly specified.[/bold yellow]")
             backend = MockLLMBackend()
+        else:
+            console.print("[bold red]ERROR: CUDA GPU acceleration is required for LLM summarization, but PyTorch CUDA is not available![/bold red]")
+            console.print("[yellow]To run real LLM inference with Qwen 2.5 7B on your RTX 2080 Ti, install PyTorch compiled for CUDA 12.1 (+cu121).[/yellow]")
+            console.print("[yellow]If you explicitly want mock summaries for testing without GPU, re-run with --mock.[/yellow]")
+            raise typer.Exit(code=1)
 
         summarizer = TechnicalSummarizer(backend=backend, max_attempts=config.llm.generation_attempts)
 
         for cand in candidates:
             p = cand.paper
-            retrieved = hybrid_engine.hybrid_search(
+            if not (cand.pdf_path and os.path.exists(cand.pdf_path)):
+                if config.acquisition.require_downloaded_pdf:
+                    logger.info(f"Skipping summarization for '{p.title}' - no downloaded PDF available")
+                    continue
+            # Fetch targeted chunks for both methodology and empirical findings
+            retrieved_methodology = hybrid_engine.hybrid_search(
                 repo=repo,
                 run_id=r_uuid,
                 paper_id=p.id,
-                query_text=f"Technical methodology and problem formulation of {p.title}",
+                query_text=f"Algorithm framework model formulation methodology approach of {p.title}",
                 dense_top_k=config.retrieval.dense_top_k,
                 sparse_top_k=config.retrieval.sparse_top_k,
-                fused_top_k=config.retrieval.fused_top_k
+                fused_top_k=config.retrieval.fused_top_k // 2
+            )
+            retrieved_empirical = hybrid_engine.hybrid_search(
+                repo=repo,
+                run_id=r_uuid,
+                paper_id=p.id,
+                query_text=f"Empirical results benchmark evaluation findings accuracy performance of {p.title}",
+                dense_top_k=config.retrieval.dense_top_k,
+                sparse_top_k=config.retrieval.sparse_top_k,
+                fused_top_k=config.retrieval.fused_top_k // 2
             )
 
-            retrieved_chunks = [item[0] for item in retrieved]
+            seen_cids = set()
+            retrieved_chunks = []
+            for item in retrieved_methodology + retrieved_empirical:
+                chunk_obj = item[0]
+                cid = chunk_obj.get("id") or chunk_obj.get("chunk_index")
+                if cid not in seen_cids:
+                    seen_cids.add(cid)
+                    retrieved_chunks.append(chunk_obj)
+
             cand_meta = {"title": p.title, "authors": p.authors, "publication_year": p.publication_year}
 
             tech_summary = summarizer.summarize_candidate(cand_meta, retrieved_chunks)
@@ -452,14 +488,21 @@ def report(
         repo = LEARepository(session)
         from lea.exporter.html_builder import HTMLReportExporter
         exporter = HTMLReportExporter()
-        out_path = exporter.export_report(repo, r_uuid, output, title=config.report.title)
+        out_path = exporter.export_report(
+            repo,
+            r_uuid,
+            output,
+            title=config.report.title,
+            include_abstract_only=config.report.include_abstract_only_results
+        )
         console.print(f"[bold green]Successfully generated report at [cyan]{out_path}[/cyan][/bold green]")
 
 
 @app.command()
 def run(
     pdf_path: str = typer.Argument(..., help="Path to input paper PDF"),
-    output: str = typer.Option("report.html", "--output", "-o", help="Path to output HTML report")
+    output: str = typer.Option("report.html", "--output", "-o", help="Path to output HTML report"),
+    allow_mock: bool = typer.Option(False, "--mock", help="Allow mock LLM backend fallback for testing without GPU")
 ):
     """Executes full end-to-end literature exploration pipeline."""
     console.print(f"[bold blue]Starting end-to-end LEA pipeline for paper {pdf_path}...[/bold blue]")
@@ -537,7 +580,7 @@ def run(
 
     acquire(run_id)
     index(run_id)
-    summarize(run_id)
+    summarize(run_id, allow_mock=allow_mock)
     report(run_id, output=output)
 
     console.print(f"[bold green]End-to-end pipeline completed successfully! Output: {output}[/bold green]")

@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Tuple
 from lea.rag.bm25_index import BM25Index
 from lea.rag.dense_search import DenseSearchEngine
+from lea.rag.chunker import is_reference_chunk, is_low_quality_chunk
 from lea.db.repository import LEARepository
 
 def compute_rrf_fusion(
@@ -27,6 +28,15 @@ def compute_rrf_fusion(
     sorted_ids = sorted(scores.keys(), key=lambda cid: scores[cid], reverse=True)
     fused = [(chunk_map[cid], scores[cid]) for cid in sorted_ids[:fused_top_k]]
     return fused
+
+
+def _is_clean_chunk(chunk: Dict[str, Any]) -> bool:
+    """Return True if chunk content is suitable prose to pass to the LLM."""
+    content = chunk.get("content", "") or ""
+    if is_reference_chunk(content) or is_low_quality_chunk(content):
+        return False
+    return True
+
 
 class HybridSearchEngine:
     def __init__(self, dense_engine: DenseSearchEngine, rrf_k: int = 60):
@@ -69,4 +79,9 @@ class HybridSearchEngine:
         sparse_results = bm25_index.search(query_text, top_k=sparse_top_k)
 
         # 3. Reciprocal Rank Fusion
-        return compute_rrf_fusion(paper_dense, sparse_results, rrf_k=self.rrf_k, fused_top_k=fused_top_k)
+        fused = compute_rrf_fusion(paper_dense, sparse_results, rrf_k=self.rrf_k, fused_top_k=fused_top_k * 3)
+
+        # 4. Post-retrieval filter: drop reference lists and low-quality noise chunks
+        clean = [(chunk, score) for chunk, score in fused if _is_clean_chunk(chunk)]
+        return clean[:fused_top_k]
+

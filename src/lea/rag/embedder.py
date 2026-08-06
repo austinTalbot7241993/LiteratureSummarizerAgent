@@ -11,7 +11,7 @@ def _subproc_embed_worker(model_name: str, texts: List[str], max_length: int, co
         from sentence_transformers import SentenceTransformer
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = SentenceTransformer(model_name, device=device)
+        model = SentenceTransformer(model_name, device=device, model_kwargs={"use_safetensors": True})
         model.max_seq_length = max_length
         embeddings = model.encode(texts, normalize_embeddings=True, convert_to_numpy=True)
         conn.send(embeddings.tolist())
@@ -47,20 +47,39 @@ class BGEEmbedder:
         try:
             from sentence_transformers import SentenceTransformer
             if self._local_model is None:
-                self._local_model = SentenceTransformer(self.model_name)
+                self._local_model = SentenceTransformer(self.model_name, model_kwargs={"use_safetensors": True})
                 self._local_model.max_seq_length = self.max_length
             embeddings = self._local_model.encode(texts, normalize_embeddings=True, convert_to_numpy=True)
             return embeddings.tolist()
-        except Exception as exc:
-            logger.warning(f"SentenceTransformer not available or failed: {exc}. Using deterministic pseudo-embeddings for testing.")
-            # Deterministic fallback embedding generation for test environments
-            results = []
-            for t in texts:
-                # Generate pseudo-random vector based on hash of text
-                seed = sum(ord(c) for c in t) % (2**32)
-                np.random.seed(seed)
-                vec = np.random.randn(1024).astype(np.float32)
-                norm = np.linalg.norm(vec)
-                vec = (vec / norm).tolist() if norm > 0 else vec.tolist()
-                results.append(vec)
-            return results
+        except Exception:
+            try:
+                import torch
+                from transformers import AutoTokenizer, AutoModel
+                if self._local_model is None:
+                    tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+                    model = AutoModel.from_pretrained(self.model_name, trust_remote_code=True)
+                    model.eval()
+                    self._local_model = (tokenizer, model)
+
+                tokenizer, model = self._local_model
+                inputs = tokenizer(texts, padding=True, truncation=True, max_length=self.max_length, return_tensors="pt")
+                with torch.no_grad():
+                    outputs = model(**inputs)
+                    token_embeddings = outputs[0]
+                    attention_mask = inputs["attention_mask"].unsqueeze(-1).expand(token_embeddings.size()).float()
+                    sum_embeddings = torch.sum(token_embeddings * attention_mask, 1)
+                    sum_mask = torch.clamp(attention_mask.sum(1), min=1e-9)
+                    pooled = sum_embeddings / sum_mask
+                    normalized = torch.nn.functional.normalize(pooled, p=2, dim=1)
+                    return normalized.cpu().numpy().tolist()
+            except Exception as exc:
+                logger.warning(f"Embedding model loading failed: {exc}. Using deterministic pseudo-embeddings for testing.")
+                results = []
+                for t in texts:
+                    seed = sum(ord(c) for c in t) % (2**32)
+                    np.random.seed(seed)
+                    vec = np.random.randn(1024).astype(np.float32)
+                    norm = np.linalg.norm(vec)
+                    vec = (vec / norm).tolist() if norm > 0 else vec.tolist()
+                    results.append(vec)
+                return results
