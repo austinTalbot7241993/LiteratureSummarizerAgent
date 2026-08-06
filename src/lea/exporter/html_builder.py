@@ -59,7 +59,9 @@ class HTMLReportExporter:
                     "problem_formulation": summary.problem_formulation,
                     "methodological_novelty": summary.methodological_novelty,
                     "empirical_findings": summary.empirical_findings,
-                    "paragraph_summary": summary.paragraph_summary
+                    "paragraph_summary": summary.paragraph_summary,
+                    "data_availability": getattr(summary, "data_availability", "proprietary"),
+                    "data_location": getattr(summary, "data_location", None)
                 }
 
             items.append({

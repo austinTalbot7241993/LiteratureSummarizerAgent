@@ -147,7 +147,18 @@ class LEARepository:
             return valid_chunks[:top_k]
 
     # --- Technical Summaries ---
-    def add_summary(self, run_id: uuid.UUID, candidate_paper_id: uuid.UUID, problem_formulation: str, methodological_novelty: str, empirical_findings: str, paragraph_summary: str, model_name: str) -> TechnicalSummaryModel:
+    def add_summary(
+        self,
+        run_id: uuid.UUID,
+        candidate_paper_id: uuid.UUID,
+        problem_formulation: str,
+        methodological_novelty: str,
+        empirical_findings: str,
+        paragraph_summary: str,
+        model_name: str,
+        data_availability: str = "proprietary",
+        data_location: Optional[str] = None
+    ) -> TechnicalSummaryModel:
         summary = TechnicalSummaryModel(
             run_id=run_id,
             candidate_paper_id=candidate_paper_id,
@@ -155,6 +166,8 @@ class LEARepository:
             methodological_novelty=methodological_novelty,
             empirical_findings=empirical_findings,
             paragraph_summary=paragraph_summary,
+            data_availability=data_availability,
+            data_location=data_location,
             model_name=model_name
         )
         self.session.add(summary)

@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 from typing import Generator
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from lea.db.models import Base
 
@@ -51,3 +51,22 @@ def create_tables(engine=None):
     if engine is None:
         engine = get_engine()
     Base.metadata.create_all(bind=engine)
+
+    try:
+        with engine.connect() as conn:
+            is_sqlite = engine.dialect.name == "sqlite"
+            columns = [
+                ("data_availability", "VARCHAR(50) DEFAULT 'proprietary'"),
+                ("data_location", "TEXT")
+            ]
+            for col_name, col_type in columns:
+                try:
+                    if is_sqlite:
+                        conn.execute(text(f"ALTER TABLE technical_summaries ADD COLUMN {col_name} {col_type};"))
+                    else:
+                        conn.execute(text(f"ALTER TABLE technical_summaries ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                    conn.commit()
+                except Exception:
+                    pass
+    except Exception:
+        pass

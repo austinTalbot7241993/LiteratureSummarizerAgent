@@ -466,6 +466,8 @@ def summarize(
                 methodological_novelty=tech_summary.methodological_novelty,
                 empirical_findings=tech_summary.empirical_findings,
                 paragraph_summary=tech_summary.paragraph_summary,
+                data_availability=tech_summary.data_availability,
+                data_location=tech_summary.data_location,
                 model_name=config.llm.model
             )
 

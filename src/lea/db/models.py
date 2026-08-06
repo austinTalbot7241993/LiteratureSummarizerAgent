@@ -120,6 +120,8 @@ class TechnicalSummaryModel(Base):
     methodological_novelty = Column(Text, nullable=False)
     empirical_findings = Column(Text, nullable=False)
     paragraph_summary = Column(Text, nullable=False)
+    data_availability = Column(String(50), nullable=False, default="proprietary")
+    data_location = Column(Text, nullable=True)
     model_name = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 

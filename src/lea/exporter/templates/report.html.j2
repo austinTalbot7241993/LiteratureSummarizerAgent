@@ -79,10 +79,22 @@
             font-weight: 500;
         }
 
-        .badge-success {
+        .badge-success, .badge-public {
             background: rgba(16, 185, 129, 0.15);
             color: #6ee7b7;
             border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-warning, .badge-restricted {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fcd34d;
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+
+        .badge-proprietary {
+            background: rgba(139, 92, 246, 0.15);
+            color: #c084fc;
+            border-color: rgba(139, 92, 246, 0.3);
         }
 
         .section-title {
@@ -232,6 +244,15 @@
                         {% if item.paper.is_open_access %}
                         <span class="badge badge-success">Open Access PDF</span>
                         {% endif %}
+                        {% if item.summary and item.summary.data_availability %}
+                          {% if item.summary.data_availability == 'publicly_available' %}
+                          <span class="badge badge-public">🌐 Publicly Available Data</span>
+                          {% elif item.summary.data_availability == 'restricted' %}
+                          <span class="badge badge-restricted">🔒 Restricted Access Data</span>
+                          {% else %}
+                          <span class="badge badge-proprietary">🏢 Proprietary Data</span>
+                          {% endif %}
+                        {% endif %}
                     </div>
                     <div class="paper-title">{{ item.paper.title }}</div>
                     <div class="paper-authors">
@@ -253,6 +274,26 @@
                 <div class="summary-field">
                     <label>Empirical Findings</label>
                     <div>{{ item.summary.empirical_findings }}</div>
+                </div>
+                <div class="summary-field">
+                    <label>Data Availability & Location</label>
+                    <div>
+                        {% if item.summary.data_availability == 'publicly_available' %}
+                        <span style="color: #6ee7b7; font-weight: 600;">Publicly Available</span>
+                        {% if item.summary.data_location %}
+                          — Location: 
+                          {% if item.summary.data_location.startswith('http') %}
+                          <a href="{{ item.summary.data_location }}" target="_blank" style="color: #60a5fa;">{{ item.summary.data_location }}</a>
+                          {% else %}
+                          <code style="color: #a7f3d0;">{{ item.summary.data_location }}</code>
+                          {% endif %}
+                        {% endif %}
+                        {% elif item.summary.data_availability == 'restricted' %}
+                        <span style="color: #fcd34d; font-weight: 600;">Restricted Access</span> (Application / Authorization Required)
+                        {% else %}
+                        <span style="color: #c084fc; font-weight: 600;">Proprietary / Undetermined</span> (Internal or Unreleased Dataset)
+                        {% endif %}
+                    </div>
                 </div>
                 <div class="summary-field" style="margin-bottom: 0;">
                     <label>Technical Synthesis</label>

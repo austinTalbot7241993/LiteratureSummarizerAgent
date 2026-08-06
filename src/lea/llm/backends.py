@@ -5,6 +5,70 @@ from lea.llm.schemas import TechnicalSummary
 from lea.exceptions import SummaryValidationError
 from lea.logging import logger
 
+def parse_data_availability_statement(da_text: str) -> tuple:
+    if not da_text:
+        return "proprietary", None
+
+    da_lower = da_text.lower()
+    first_line = da_text.strip().splitlines()[0].lower() if da_text.strip() else ""
+
+    # Check for negations first (e.g., "not publicly available", "preventing public access")
+    negation_patterns = [
+        r"not\s+(?:publicly\s+)?available",
+        r"no\s+public",
+        r"preventing?\s+public",
+        r"non[- ]public",
+        r"unavailable",
+        r"cannot\s+be\s+shared"
+    ]
+    is_negated = any(re.search(pat, da_lower) for pat in negation_patterns)
+
+    # Entity-based domain rules
+    restricted_keywords = [
+        "uk biobank", "ukbiobank", "dbgap", "ega", "european genome-phenome archive",
+        "biovu", "all of us", "controlled access", "data access committee", "dac",
+        "permission", "application required", "managed access", "authorization",
+        "access control", "restricted access", "restricted"
+    ]
+
+    public_keywords = [
+        "1000 genomes", "1kgp", "geo", "gse", "sra", "srp", "srr", "ena",
+        "genbank", "github", "huggingface", "zenodo", "figshare", "open science framework",
+        "osf", "ncbi", "ebi", "publicly_available", "publicly available"
+    ]
+
+    status = "proprietary"
+
+    if any(term in da_lower for term in restricted_keywords) or "restrict" in first_line:
+        status = "restricted"
+    elif not is_negated and (any(term in da_lower for term in public_keywords) or "public" in first_line):
+        status = "publicly_available"
+    elif "propriet" in da_lower or "private" in da_lower or is_negated:
+        status = "proprietary"
+    else:
+        status = "proprietary"
+
+    # Location extraction (ONLY if publicly_available)
+    location = None
+    if status == "publicly_available":
+        url_match = re.search(r"https?://\S+", da_text)
+        if url_match:
+            location = url_match.group(0).rstrip(".,;)")
+        else:
+            accession_match = re.search(r"\b(?:GSE|SRP|SRR|PRJN|PRJEB|PRJD|ERP)\d+\b", da_text, re.IGNORECASE)
+            if accession_match:
+                location = accession_match.group(0)
+            else:
+                loc_match = re.search(r"(?:location|accession|repository|repo|at|via|url)\s*[:=]\s*([^.,;\n]+)", da_text, re.IGNORECASE)
+                if loc_match and len(loc_match.group(1).strip()) > 3:
+                    location = loc_match.group(1).strip()
+                elif "1000 genomes" in da_lower:
+                    location = "1000 Genomes Project (https://www.internationalgenome.org)"
+                elif "github" in da_lower:
+                    location = "GitHub"
+
+    return status, location
+
 def clean_json_response(raw_text: str) -> str:
     cleaned = raw_text.strip()
     # Remove markdown code blocks if present
@@ -31,7 +95,9 @@ class MockLLMBackend(BaseLLMBackend):
             problem_formulation=f"Formulates scientific evaluation for paper '{title}'.",
             methodological_novelty="Introduces a novel hybrid retrieval and citation exclusion methodology.",
             empirical_findings="Achieves quantifiable empirical performance improvements across benchmarks.",
-            paragraph_summary=f"This paper '{title}' proposes a novel technical methodology addressing key challenges in literature synthesis. Through rigorous empirical evaluation, the authors demonstrate superior performance over standard baselines while maintaining strict exclusion constraints."
+            paragraph_summary=f"This paper '{title}' proposes a novel technical methodology addressing key challenges in literature synthesis. Through rigorous empirical evaluation, the authors demonstrate superior performance over standard baselines while maintaining strict exclusion constraints.",
+            data_availability="publicly_available",
+            data_location="https://www.internationalgenome.org"
         )
 
 class TransformersPeftBackend(BaseLLMBackend):
@@ -117,9 +183,10 @@ class TransformersPeftBackend(BaseLLMBackend):
 
         # Parse labeled section headers from prose
         patterns = {
-            "problem_formulation": r"(?:PROBLEM FORMULATION|PROBLEM STATEMENT|PROBLEM)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:METHODOLOGICAL NOVELTY|METHODOLOGY|EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
-            "methodological_novelty": r"(?:METHODOLOGICAL NOVELTY|METHODOLOGY|NOVELTY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
-            "empirical_findings": r"(?:EMPIRICAL FINDINGS|RESULTS|EMPIRICAL EVALUATION)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:|\s*$)",
+            "problem_formulation": r"(?:PROBLEM FORMULATION|PROBLEM STATEMENT|PROBLEM)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:METHODOLOGICAL NOVELTY|METHODOLOGY|EMPIRICAL FINDINGS|RESULTS|DATA AVAILABILITY|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
+            "methodological_novelty": r"(?:METHODOLOGICAL NOVELTY|METHODOLOGY|NOVELTY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:EMPIRICAL FINDINGS|RESULTS|DATA AVAILABILITY|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
+            "empirical_findings": r"(?:EMPIRICAL FINDINGS|RESULTS|EMPIRICAL EVALUATION)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:DATA AVAILABILITY|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
+            "data_availability_raw": r"(?:DATA AVAILABILITY|DATA ACCESSIBILITY|DATA ACCESS)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:|\s*$)",
             "paragraph_summary": r"(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:\s*(.*?)(?=\s*$)"
         }
 
@@ -138,6 +205,13 @@ class TransformersPeftBackend(BaseLLMBackend):
                 f"LLM output failed to produce required section(s) {missing} for paper '{t_str}'. "
                 f"Raw response generated by model:\n{raw_response[:600]}"
             )
+
+        # Parse data availability classification & location
+        da_text = parsed_fields.pop("data_availability_raw", "")
+        status, location = parse_data_availability_statement(da_text)
+
+        parsed_fields["data_availability"] = status
+        parsed_fields["data_location"] = location
 
         # Truncate paragraph_summary to <= 300 words if necessary
         words = parsed_fields["paragraph_summary"].split()
