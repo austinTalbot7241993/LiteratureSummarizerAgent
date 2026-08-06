@@ -1,9 +1,28 @@
 import os
+import re
 from pathlib import Path
 from typing import List, Optional
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+def _expand_env_vars(content: str) -> str:
+    pattern = re.compile(r"\$\{([A-Za-z0-9_]+)(?::-([^}]*))?\}")
+    def _replace(match):
+        var_name = match.group(1)
+        default_val = match.group(2)
+        val = os.getenv(var_name)
+        if val is not None and val != "":
+            return val
+        return default_val if default_val is not None else ""
+    return pattern.sub(_replace, content)
+
 
 class ApplicationConfig(BaseModel):
     log_level: str = "INFO"
@@ -13,7 +32,7 @@ class ApplicationConfig(BaseModel):
     max_retries: int = 4
 
 class ServicesConfig(BaseModel):
-    database_url: str = Field(default_factory=lambda: os.getenv("LEA_DATABASE_URL", "postgresql://lea_user:lea_pass@localhost:5432/lea_db"))
+    database_url: str = Field(default_factory=lambda: os.getenv("LEA_DATABASE_URL", "postgresql://lea_user:lea_pass@localhost:5433/lea_db"))
     grobid_url: str = Field(default_factory=lambda: os.getenv("LEA_GROBID_URL", "http://localhost:8070"))
     openalex_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("OPENALEX_API_KEY"))
     semantic_scholar_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("SEMANTIC_SCHOLAR_API_KEY"))
@@ -37,6 +56,7 @@ class DiscoveryConfig(BaseModel):
 
 class AcquisitionConfig(BaseModel):
     download_open_access_pdfs: bool = True
+    require_downloaded_pdf: bool = True
     max_pdf_bytes: int = 104857600
     allowed_content_types: List[str] = ["application/pdf"]
     user_agent: str = "LEA/0.1 scholarly-research-agent"
@@ -83,7 +103,7 @@ class LLMConfig(BaseModel):
 
 class ReportConfig(BaseModel):
     title: str = "Literature Exploration Report"
-    include_abstract_only_results: bool = True
+    include_abstract_only_results: bool = False
     include_retrieval_provenance: bool = True
     include_bibtex: bool = True
 
@@ -113,8 +133,8 @@ def load_config(config_path: Optional[str] = None) -> LEAConfig:
         if p.exists():
             with open(p, "r", encoding="utf-8") as f:
                 content = f.read()
-                # Simple env expansion for ${VAR:-default} or ${VAR}
-                expanded = os.path.expandvars(content)
+                # Env expansion for ${VAR:-default} or ${VAR}
+                expanded = _expand_env_vars(content)
                 data = yaml.safe_load(expanded) or {}
                 break
 

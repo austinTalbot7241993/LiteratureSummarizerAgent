@@ -20,8 +20,14 @@ class LEARepository:
     def get_paper_by_doi(self, doi: str) -> Optional[Paper]:
         return self.session.query(Paper).filter(Paper.doi == doi).first()
 
+    def _clean_str(self, val: Any) -> Any:
+        if isinstance(val, str):
+            return val.replace("\x00", "").replace("\u0000", "")
+        return val
+
     def create_paper(self, **kwargs) -> Paper:
-        paper = Paper(**kwargs)
+        clean_kwargs = {k: self._clean_str(v) for k, v in kwargs.items()}
+        paper = Paper(**clean_kwargs)
         self.session.add(paper)
         self.session.flush()
         return paper
@@ -30,13 +36,14 @@ class LEARepository:
         paper = self.get_paper_by_id(paper_id)
         if paper:
             for k, v in kwargs.items():
-                setattr(paper, k, v)
+                setattr(paper, k, self._clean_str(v))
             self.session.flush()
         return paper
 
     # --- Paper References ---
     def add_reference(self, source_paper_id: uuid.UUID, **kwargs) -> PaperReference:
-        ref = PaperReference(source_paper_id=source_paper_id, **kwargs)
+        clean_kwargs = {k: self._clean_str(v) for k, v in kwargs.items()}
+        ref = PaperReference(source_paper_id=source_paper_id, **clean_kwargs)
         self.session.add(ref)
         self.session.flush()
         return ref
@@ -72,8 +79,8 @@ class LEARepository:
             score=score,
             rrf_rank=rrf_rank,
             source_apis=source_apis or [],
-            open_access_url=open_access_url,
-            pdf_path=pdf_path
+            open_access_url=self._clean_str(open_access_url),
+            pdf_path=self._clean_str(pdf_path)
         )
         self.session.add(candidate)
         self.session.flush()
@@ -87,12 +94,13 @@ class LEARepository:
 
     # --- Text Chunks ---
     def add_chunk(self, paper_id: uuid.UUID, run_id: uuid.UUID, chunk_type: str, content: str, chunk_index: int, token_count: int, parent_id: Optional[uuid.UUID] = None, embedding: Optional[List[float]] = None) -> TextChunk:
+        clean_content = self._clean_str(content)
         chunk = TextChunk(
             paper_id=paper_id,
             run_id=run_id,
             chunk_type=chunk_type,
             parent_id=parent_id,
-            content=content,
+            content=clean_content,
             chunk_index=chunk_index,
             token_count=token_count,
             embedding=embedding

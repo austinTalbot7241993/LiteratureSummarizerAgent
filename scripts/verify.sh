@@ -16,6 +16,9 @@ pytest tests/integration -v --tb=short
 echo "Step 3: Running CLI doctor check..."
 python3 -m lea doctor
 
+echo "Step 4: Running GPU LLM inference tests..."
+pytest tests/gpu -v --tb=short
+
 echo "======================================================"
 echo " All LEA verification checks completed successfully!"
 echo "======================================================"
