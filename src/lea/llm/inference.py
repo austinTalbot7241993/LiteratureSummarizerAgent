@@ -32,6 +32,18 @@ class TechnicalSummarizer:
         last_error = None
         for attempt in range(1, self.max_attempts + 1):
             try:
+                if attempt > 1:
+                    # On retry, reduce context size and append explicit formatting directive
+                    truncated_chunks = retrieved_chunks[: max(1, len(retrieved_chunks) // 2)]
+                    c_texts = [f"[{i+1}] {c.get('content')}" for i, c in enumerate(truncated_chunks)]
+                    c_str = "\n\n".join(c_texts) if c_texts else "No full text chunks available."
+                    user_prompt = SUMMARY_USER_PROMPT_TEMPLATE.format(
+                        title=title,
+                        authors=authors,
+                        year=year,
+                        context_text=c_str
+                    ) + "\n\nCRITICAL RETRY DIRECTIVE: You MUST output all 4 section headers: PROBLEM FORMULATION:, METHODOLOGICAL NOVELTY:, EMPIRICAL FINDINGS:, TECHNICAL SYNTHESIS:."
+
                 logger.info(f"Generating summary for '{title}' (Attempt {attempt}/{self.max_attempts})...")
                 summary = self.backend.generate_summary(SUMMARY_SYSTEM_PROMPT, user_prompt)
                 return summary

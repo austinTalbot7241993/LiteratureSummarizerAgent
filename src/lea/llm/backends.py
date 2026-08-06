@@ -76,13 +76,19 @@ class TransformersPeftBackend(BaseLLMBackend):
         self._load_model()
         import torch
 
+        system_tokens = self._tokenizer.encode(system_prompt, add_special_tokens=False)
+        max_user_tokens = max(200, self.max_context_tokens - len(system_tokens) - 100)
+        user_tokens = self._tokenizer.encode(user_prompt, add_special_tokens=False)
+        if len(user_tokens) > max_user_tokens:
+            user_prompt = self._tokenizer.decode(user_tokens[:max_user_tokens], skip_special_tokens=True)
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 
         text_input = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self._tokenizer(text_input, return_tensors="pt", truncation=True, max_length=self.max_context_tokens).to("cuda")
+        inputs = self._tokenizer(text_input, return_tensors="pt").to("cuda")
 
         with torch.no_grad():
             outputs = self._model.generate(

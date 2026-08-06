@@ -24,6 +24,12 @@ SUMMARY_USER_PROMPT_TEMPLATE = """Paper Title: {title}
 Authors: {authors}
 Publication Year: {year}
 
+REQUIRED FORMAT: You MUST format your response into the 4 required labeled section headers below:
+PROBLEM FORMULATION:
+METHODOLOGICAL NOVELTY:
+EMPIRICAL FINDINGS:
+TECHNICAL SYNTHESIS:
+
 Retrieved Context Chunks:
 {context_text}
 
