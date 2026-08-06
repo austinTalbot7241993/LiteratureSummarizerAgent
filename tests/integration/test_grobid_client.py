@@ -5,7 +5,7 @@ from lea.ingester.grobid_client import GrobidClient
 from lea.ingester.tei_parser import TEIParser
 
 def test_grobid_tei_parser_fixture():
-    fixture_path = Path("tests/fixtures/sample_grobid.tei.xml")
+    fixture_path = Path(__file__).resolve().parent.parent / "fixtures" / "sample_grobid.tei.xml"
     with open(fixture_path, "r", encoding="utf-8") as f:
         xml_content = f.read()
 

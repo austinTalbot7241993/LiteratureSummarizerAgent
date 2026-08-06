@@ -1,14 +1,15 @@
-import os
+from pathlib import Path
 import pytest
 from lea.ingester.pdf_parser import PDFParser
 from lea.rag.chunker import HierarchicalChunker
 from lea.rag.prompts import SUMMARY_SYSTEM_PROMPT, SUMMARY_USER_PROMPT_TEMPLATE
 
-def test_real_pdf_extraction_and_prompt_formatting():
-    pdf_path = "tests/fixtures/sample_real_paper.pdf"
-    assert os.path.exists(pdf_path), "Real sample PDF fixture missing"
+FIXTURE_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "sample_real_paper.pdf"
 
-    pdf = PDFParser(pdf_path)
+def test_real_pdf_extraction_and_prompt_formatting():
+    assert FIXTURE_PATH.exists(), "Real sample PDF fixture missing"
+
+    pdf = PDFParser(str(FIXTURE_PATH))
     body_text = pdf.extract_body_text()
     assert len(body_text) > 500, "Failed to extract body text from real PDF"
 
@@ -36,15 +37,7 @@ def test_real_pdf_extraction_and_prompt_formatting():
     assert len(user_prompt) > 200
 
 def test_real_gpu_llm_inference():
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            pytest.skip("CUDA GPU not available; skipping real LLM GPU test")
-    except ImportError:
-        pytest.skip("PyTorch not installed")
-
-    pdf_path = "tests/fixtures/sample_real_paper.pdf"
-    pdf = PDFParser(pdf_path)
+    pdf = PDFParser(str(FIXTURE_PATH))
     body_text = pdf.extract_body_text()
     chunker = HierarchicalChunker(tokenizer_model="BAAI/bge-m3")
     chunks = chunker.chunk_text(body_text)
