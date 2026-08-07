@@ -18,7 +18,16 @@ class FailingFirstAttemptBackend(BaseLLMBackend):
             problem_formulation="Valid problem statement.",
             methodological_novelty="Valid methodological novelty.",
             empirical_findings="Valid empirical findings.",
-            paragraph_summary="Valid single paragraph summary."
+            paragraph_summary="Valid single paragraph summary.",
+            data_availability="publicly_available"
+        )
+
+    def generate_data_availability(self, system_prompt: str, user_prompt: str):
+        from lea.llm.schemas import DataAvailabilityAssessment, PaperAvailabilityStatus
+        return DataAvailabilityAssessment(
+            overall_status=PaperAvailabilityStatus.NOT_REPORTED,
+            datasets=[],
+            rationale="Not reported"
         )
 
 def test_user_prompt_template_places_directives_before_context():
@@ -43,7 +52,7 @@ def test_summarizer_retry_reduces_context_and_adds_directive():
     chunks = [{"content": f"Chunk content {i}"} for i in range(10)]
     candidate_meta = {"title": "Paper on Scalable Sequencing", "authors": ["Alice"], "year": 2024}
 
-    summary = summarizer.summarize_candidate(candidate_meta, chunks)
+    summary, assessment = summarizer.summarize_candidate(candidate_meta, chunks)
 
     assert summary.paragraph_summary == "Valid single paragraph summary."
     assert len(backend.call_history) == 2
@@ -64,5 +73,34 @@ def test_summarizer_handles_extremely_large_context():
     large_chunks = [{"content": "Word " * 1000} for _ in range(50)]
     candidate_meta = {"title": "Large Context Paper", "authors": ["Bob"], "year": 2024}
 
-    summary = summarizer.summarize_candidate(candidate_meta, large_chunks)
+    summary, assessment = summarizer.summarize_candidate(candidate_meta, large_chunks)
     assert summary is not None
+
+def test_backends_module_imports_gc_and_os():
+    import lea.llm.backends as backends_mod
+    assert hasattr(backends_mod, "gc")
+    assert hasattr(backends_mod, "os")
+
+class AlwaysFailingAvailBackend(BaseLLMBackend):
+    def generate_summary(self, system_prompt: str, user_prompt: str) -> TechnicalSummary:
+        return TechnicalSummary(
+            problem_formulation="Valid problem statement.",
+            methodological_novelty="Valid methodological novelty.",
+            empirical_findings="Valid empirical findings.",
+            paragraph_summary="Valid single paragraph summary.",
+            data_availability="publicly_available"
+        )
+
+    def generate_data_availability(self, system_prompt: str, user_prompt: str):
+        raise SummaryValidationError("Simulated permanent validation failure")
+
+def test_extract_data_availability_fallback_on_failure():
+    backend = AlwaysFailingAvailBackend()
+    summarizer = TechnicalSummarizer(backend=backend, max_attempts=2)
+    candidate_meta = {"title": "Failing Avail Paper", "authors": ["Charlie"], "year": 2024}
+
+    assessment = summarizer.extract_data_availability(candidate_meta, [{"content": "sample text"}])
+    from lea.llm.schemas import PaperAvailabilityStatus
+    assert assessment.overall_status == PaperAvailabilityStatus.NOT_REPORTED
+    assert "Defaulted to not_reported" in assessment.rationale
+

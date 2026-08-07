@@ -6,7 +6,8 @@ def test_valid_technical_summary():
         problem_formulation="Statistical estimation of sparse matrices",
         methodological_novelty="First algorithm with O(n log n) complexity guarantee",
         empirical_findings="Tested on 5 benchmarks showing 3x speedup",
-        paragraph_summary="This paper presents a novel algorithmic solution to sparse matrix estimation."
+        paragraph_summary="This paper presents a novel algorithmic solution to sparse matrix estimation.",
+        data_availability="publicly_available"
     )
     assert summary.paragraph_summary.startswith("This paper")
 
@@ -16,7 +17,8 @@ def test_summary_fails_if_multiple_paragraphs():
             problem_formulation="P",
             methodological_novelty="M",
             empirical_findings="E",
-            paragraph_summary="First paragraph.\n\nSecond paragraph."
+            paragraph_summary="First paragraph.\n\nSecond paragraph.",
+            data_availability="unclear"
         )
 
 def test_summary_fails_if_exceeds_word_limit():
@@ -26,5 +28,6 @@ def test_summary_fails_if_exceeds_word_limit():
             problem_formulation="P",
             methodological_novelty="M",
             empirical_findings="E",
-            paragraph_summary=long_text
+            paragraph_summary=long_text,
+            data_availability="unclear"
         )

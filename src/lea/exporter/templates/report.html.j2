@@ -79,10 +79,22 @@
             font-weight: 500;
         }
 
-        .badge-success {
+        .badge-success, .badge-public {
             background: rgba(16, 185, 129, 0.15);
             color: #6ee7b7;
             border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-warning, .badge-restricted {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fcd34d;
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+
+        .badge-proprietary {
+            background: rgba(139, 92, 246, 0.15);
+            color: #c084fc;
+            border-color: rgba(139, 92, 246, 0.3);
         }
 
         .section-title {
@@ -232,6 +244,21 @@
                         {% if item.paper.is_open_access %}
                         <span class="badge badge-success">Open Access PDF</span>
                         {% endif %}
+                        {% if item.summary and item.summary.data_availability %}
+                          {% if item.summary.data_availability == 'publicly_available' %}
+                          <span class="badge badge-public">🌐 Publicly Available Data</span>
+                          {% elif item.summary.data_availability == 'restricted' %}
+                          <span class="badge badge-restricted">🔒 Restricted Access Data</span>
+                          {% elif item.summary.data_availability == 'not_available' %}
+                          <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3);">🚫 Data Not Available</span>
+                          {% elif item.summary.data_availability == 'not_reported' %}
+                          <span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border-color: rgba(148, 163, 184, 0.3);">❓ Data Availability Not Reported</span>
+                          {% elif item.summary.data_availability == 'mixed' %}
+                          <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #e9d5ff; border-color: rgba(168, 85, 247, 0.3);">🔀 Mixed Data Availability</span>
+                          {% else %}
+                          <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3);">⚠️ Data Availability Unclear</span>
+                          {% endif %}
+                        {% endif %}
                     </div>
                     <div class="paper-title">{{ item.paper.title }}</div>
                     <div class="paper-authors">
@@ -253,6 +280,50 @@
                 <div class="summary-field">
                     <label>Empirical Findings</label>
                     <div>{{ item.summary.empirical_findings }}</div>
+                </div>
+                <div class="summary-field">
+                    <label>Data Availability & Evidence</label>
+                    <div>
+                        {% if item.summary.data_availability == 'publicly_available' %}
+                        <span style="color: #6ee7b7; font-weight: 600;">Publicly Available</span>
+                        {% elif item.summary.data_availability == 'restricted' %}
+                        <span style="color: #fcd34d; font-weight: 600;">Restricted Access</span> (Application / Approval Required)
+                        {% elif item.summary.data_availability == 'not_available' %}
+                        <span style="color: #fca5a5; font-weight: 600;">Not Available</span> (Cannot be shared / Private)
+                        {% elif item.summary.data_availability == 'not_reported' %}
+                        <span style="color: #cbd5e1; font-weight: 600;">Not Reported</span> (No availability statement in paper)
+                        {% elif item.summary.data_availability == 'mixed' %}
+                        <span style="color: #e9d5ff; font-weight: 600;">Mixed Access</span> (Multiple datasets with different statuses)
+                        {% else %}
+                        <span style="color: #fcd34d; font-weight: 600;">Unclear</span> (Insufficient or conflicting evidence)
+                        {% endif %}
+
+                        {% if item.summary.data_location %}
+                          — Location/Access: 
+                          {% if item.summary.data_location.startswith('http') %}
+                          <a href="{{ item.summary.data_location }}" target="_blank" style="color: #60a5fa;">{{ item.summary.data_location }}</a>
+                          {% else %}
+                          <code style="color: #a7f3d0;">{{ item.summary.data_location }}</code>
+                          {% endif %}
+                        {% endif %}
+
+                        {% if item.summary.data_availability_assessment and item.summary.data_availability_assessment.datasets %}
+                        <div style="margin-top: 0.75rem; font-size: 0.85rem; background: rgba(0, 0, 0, 0.2); padding: 0.75rem; border-radius: 6px;">
+                          <strong>Datasets Identified:</strong>
+                          <ul style="margin-left: 1.25rem; margin-top: 0.25rem;">
+                            {% for d in item.summary.data_availability_assessment.datasets %}
+                            <li>
+                              <strong>{{ d.dataset_name or 'Dataset' }}</strong> (<em>{{ d.role }}</em>):
+                              <span style="font-weight: 600;">{{ d.status }}</span>
+                              {% if d.repository %} | Repo: {{ d.repository }}{% endif %}
+                              {% if d.accession %} | Accession: <code>{{ d.accession }}</code>{% endif %}
+                              {% if d.access_conditions %} | Conditions: <em>{{ d.access_conditions }}</em>{% endif %}
+                            </li>
+                            {% endfor %}
+                          </ul>
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
                 <div class="summary-field" style="margin-bottom: 0;">
                     <label>Technical Synthesis</label>

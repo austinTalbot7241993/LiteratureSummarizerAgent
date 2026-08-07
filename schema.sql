@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS text_chunks (
     content TEXT NOT NULL,
     chunk_index INT NOT NULL,
     token_count INT NOT NULL,
+    section_title TEXT,
+    page_number INT,
     embedding vector(1024),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -93,6 +95,9 @@ CREATE TABLE IF NOT EXISTS technical_summaries (
     methodological_novelty TEXT NOT NULL,
     empirical_findings TEXT NOT NULL,
     paragraph_summary TEXT NOT NULL,
+    data_availability VARCHAR(50) NOT NULL,
+    data_location TEXT,
+    data_availability_assessment JSONB,
     model_name VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
