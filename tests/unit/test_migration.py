@@ -67,3 +67,81 @@ def test_case23_no_substantive_proprietary_defaults():
     # Database model TechnicalSummaryModel column has no default='proprietary'
     col_default = TechnicalSummaryModel.data_availability.property.columns[0].default
     assert col_default is None, "data_availability Column must not have a default='proprietary'"
+
+
+def test_missing_text_chunks_columns_auto_migrate(tmp_path):
+    import uuid
+    from lea.db.session import init_db, get_db_session
+    db_path = tmp_path / "legacy_chunks.db"
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE papers (
+            id TEXT PRIMARY KEY,
+            sha256_hash TEXT UNIQUE NOT NULL,
+            title TEXT NOT NULL,
+            authors TEXT,
+            doi TEXT,
+            arxiv_id TEXT,
+            openalex_id TEXT,
+            s2_id TEXT,
+            publication_year INTEGER,
+            venue TEXT,
+            abstract TEXT,
+            pdf_path TEXT,
+            is_open_access INTEGER,
+            oa_pdf_url TEXT,
+            raw_bibtex TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        );
+    """)
+    cursor.execute("""
+        CREATE TABLE discovery_runs (
+            id TEXT PRIMARY KEY,
+            input_paper_id TEXT NOT NULL,
+            run_status TEXT NOT NULL,
+            exclusion_status TEXT NOT NULL,
+            created_at TEXT
+        );
+    """)
+    # Legacy text_chunks table without section_title or page_number
+    cursor.execute("""
+        CREATE TABLE text_chunks (
+            id TEXT PRIMARY KEY,
+            paper_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            chunk_type TEXT NOT NULL,
+            parent_id TEXT,
+            content TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            token_count INTEGER NOT NULL,
+            embedding BLOB,
+            created_at TEXT
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+    # Initialize DB connection
+    db_url = f"sqlite:///{db_path}"
+    engine = init_db(db_url)
+
+    with get_db_session() as session:
+        repo = LEARepository(session)
+        p = repo.create_paper(sha256_hash="hash_c", title="Paper C")
+        r = repo.create_discovery_run(input_paper_id=p.id)
+        chunk = repo.add_chunk(
+            paper_id=p.id,
+            run_id=r.id,
+            chunk_type="child",
+            content="Sample text content.",
+            chunk_index=0,
+            token_count=5,
+            section_title="Data Availability",
+            page_number=4
+        )
+        assert chunk.id is not None
+        assert chunk.section_title == "Data Availability"
+        assert chunk.page_number == 4

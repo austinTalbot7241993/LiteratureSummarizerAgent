@@ -75,3 +75,32 @@ def test_summarizer_handles_extremely_large_context():
 
     summary, assessment = summarizer.summarize_candidate(candidate_meta, large_chunks)
     assert summary is not None
+
+def test_backends_module_imports_gc_and_os():
+    import lea.llm.backends as backends_mod
+    assert hasattr(backends_mod, "gc")
+    assert hasattr(backends_mod, "os")
+
+class AlwaysFailingAvailBackend(BaseLLMBackend):
+    def generate_summary(self, system_prompt: str, user_prompt: str) -> TechnicalSummary:
+        return TechnicalSummary(
+            problem_formulation="Valid problem statement.",
+            methodological_novelty="Valid methodological novelty.",
+            empirical_findings="Valid empirical findings.",
+            paragraph_summary="Valid single paragraph summary.",
+            data_availability="publicly_available"
+        )
+
+    def generate_data_availability(self, system_prompt: str, user_prompt: str):
+        raise SummaryValidationError("Simulated permanent validation failure")
+
+def test_extract_data_availability_fallback_on_failure():
+    backend = AlwaysFailingAvailBackend()
+    summarizer = TechnicalSummarizer(backend=backend, max_attempts=2)
+    candidate_meta = {"title": "Failing Avail Paper", "authors": ["Charlie"], "year": 2024}
+
+    assessment = summarizer.extract_data_availability(candidate_meta, [{"content": "sample text"}])
+    from lea.llm.schemas import PaperAvailabilityStatus
+    assert assessment.overall_status == PaperAvailabilityStatus.NOT_REPORTED
+    assert "Defaulted to not_reported" in assessment.rationale
+

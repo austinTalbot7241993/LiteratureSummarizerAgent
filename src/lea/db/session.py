@@ -18,6 +18,7 @@ def init_db(database_url: str):
 
     _engine = create_engine(database_url, connect_args=connect_args)
     _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+    create_tables(_engine)
     return _engine
 
 def get_engine():

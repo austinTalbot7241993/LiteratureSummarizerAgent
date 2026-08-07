@@ -1,3 +1,5 @@
+import os
+import gc
 import json
 import re
 from typing import Dict, Any, Optional, List
@@ -218,12 +220,13 @@ class MockLLMBackend(BaseLLMBackend):
             )
         else:
             return DataAvailabilityAssessment(
-                overall_status=PaperAvailabilityStatus.UNCLEAR,
+                overall_status=PaperAvailabilityStatus.RESTRICTED,
                 datasets=[
                     DatasetAvailability(
-                        dataset_name="Unknown Dataset",
-                        role=DatasetRole.UNKNOWN,
-                        status=DatasetAvailabilityStatus.UNCLEAR,
+                        dataset_name="Study Dataset",
+                        role=DatasetRole.PRIMARY,
+                        status=DatasetAvailabilityStatus.RESTRICTED,
+                        access_conditions="Available from the corresponding author upon reasonable request.",
                         evidence=[
                             AvailabilityEvidence(
                                 source_chunk_id=cid,
@@ -232,7 +235,7 @@ class MockLLMBackend(BaseLLMBackend):
                         ]
                     )
                 ],
-                rationale="Unclear data availability evidence."
+                rationale="Data available upon reasonable request."
             )
 
 
@@ -253,7 +256,10 @@ class TransformersPeftBackend(BaseLLMBackend):
         if self._model is not None:
             return
 
+        import os
+        import gc
         import torch
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         logger.info(f"Loading {self.model_name} in 4-bit NF4 precision (FP16 compute)...")
@@ -261,7 +267,8 @@ class TransformersPeftBackend(BaseLLMBackend):
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16
+            bnb_4bit_compute_dtype=torch.float16,
+            llm_int8_enable_fp32_cpu_offload=True
         )
 
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
@@ -333,6 +340,9 @@ class TransformersPeftBackend(BaseLLMBackend):
 
         output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
         raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        del inputs, outputs
+        torch.cuda.empty_cache()
+        gc.collect()
         logger.info(f"Raw Technical Summary LLM Output ({len(raw_response)} chars):\n{raw_response}")
 
         match_title = re.search(r"Paper Title:\s*(.+)", user_prompt)
@@ -396,7 +406,6 @@ class TransformersPeftBackend(BaseLLMBackend):
         text_input = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self._tokenizer(text_input, return_tensors="pt").to("cuda")
 
-        # Deterministic generation
         with torch.no_grad():
             outputs = self._model.generate(
                 **inputs,
@@ -406,6 +415,8 @@ class TransformersPeftBackend(BaseLLMBackend):
 
         output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
         raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        del inputs, outputs
+        torch.cuda.empty_cache()
         logger.info(f"Raw Data Availability LLM Output ({len(raw_response)} chars):\n{raw_response}")
 
         cleaned = clean_json_response(raw_response)
@@ -425,6 +436,10 @@ class TransformersPeftBackend(BaseLLMBackend):
                 f"CRITICAL REPAIR DIRECTIVE: Your previous output was invalid.\n"
                 f"Validation Error: {exc1}\n"
                 f"Previous Raw Output: {raw_response[:400]}\n"
+                f"RULES TO FIX VALIDATION ERROR:\n"
+                f"- If an accession number (e.g. SRA:SRP004777, GSE12345) or URL is present, dataset status MUST be 'publicly_available'.\n"
+                f"- 'not_available' status requires explicit refusal words (e.g., 'cannot', 'privacy', 'restricted', 'not available').\n"
+                f"- 'not_reported' status must NOT have evidence with accession numbers or data availability mentions.\n"
                 f"Return ONLY a single valid JSON object adhering strictly to DataAvailabilityAssessment schema."
             )
 
@@ -445,6 +460,9 @@ class TransformersPeftBackend(BaseLLMBackend):
 
             repair_tokens = repair_outputs[0][repair_inputs["input_ids"].shape[1]:]
             repair_response = self._tokenizer.decode(repair_tokens, skip_special_tokens=True)
+            del repair_inputs, repair_outputs
+            torch.cuda.empty_cache()
+            gc.collect()
             logger.info(f"Raw Repair LLM Output ({len(repair_response)} chars):\n{repair_response}")
 
             cleaned_repair = clean_json_response(repair_response)

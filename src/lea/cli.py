@@ -395,6 +395,7 @@ def summarize(
         from lea.rag.embedder import BGEEmbedder
         from lea.rag.dense_search import DenseSearchEngine
         from lea.rag.hybrid_search import HybridSearchEngine
+        from lea.rag.availability_retrieval import retrieve_data_availability_context
         from lea.llm.inference import TechnicalSummarizer
         from lea.llm.backends import MockLLMBackend, TransformersPeftBackend
 
@@ -404,20 +405,20 @@ def summarize(
 
         # Select backend
         import torch
-        if torch.cuda.is_available() and config.llm.device == "cuda":
+        if allow_mock:
+            console.print("[bold yellow]WARNING: Using MockLLMBackend because --mock was explicitly specified.[/bold yellow]")
+            backend = MockLLMBackend()
+        elif torch.cuda.is_available() and config.llm.device == "cuda":
             backend = TransformersPeftBackend(
                 model_name=config.llm.model,
                 adapter_path=config.llm.adapter_path,
                 max_context_tokens=config.llm.max_context_tokens
             )
-        elif allow_mock:
-            console.print("[bold yellow]WARNING: Using MockLLMBackend because --mock was explicitly specified.[/bold yellow]")
-            backend = MockLLMBackend()
         else:
             console.print("[bold red]ERROR: CUDA GPU acceleration is required for LLM summarization, but PyTorch CUDA is not available![/bold red]")
             console.print("[yellow]To run real LLM inference with Qwen 2.5 7B on your RTX 2080 Ti, install PyTorch compiled for CUDA 12.1 (+cu121).[/yellow]")
             console.print("[yellow]If you explicitly want mock summaries for testing without GPU, re-run with --mock.[/yellow]")
-            from lea.rag.availability_retrieval import retrieve_data_availability_context
+            raise typer.Exit(code=1)
 
         summarizer = TechnicalSummarizer(backend=backend, max_attempts=config.llm.generation_attempts)
 

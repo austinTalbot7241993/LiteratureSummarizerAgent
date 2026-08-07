@@ -48,12 +48,14 @@ STRICT CLASSIFICATION RULES:
 5. "Available upon reasonable request" -> "restricted".
 6. "Available after application", "institutional approval", "authorization", "registration", "credentialing", "data-use agreement (DUA)", or "data access committee (DAC) review" -> "restricted".
 7. "Not publicly available, but available upon request/approval" -> "restricted" (NOT "not_available").
-8. "Cannot be shared" or "will not be released" with no viable access mechanism -> "not_available".
-9. No relevant data availability statement found in the supplied chunks -> "not_reported".
-10. Contradictory, ambiguous, or insufficient evidence -> "unclear".
-11. If different datasets have materially different access statuses, represent each dataset separately in the "datasets" list and set "overall_status" to "mixed".
-12. Provide verbatim evidence quotes copied EXACTLY from the supplied chunks, identifying the source chunk ID.
-13. Never invent URLs, accessions, repositories, quotes, or access conditions.
+8. Use "not_available" ONLY if the text explicitly states the data cannot be shared, will not be released, or is unavailable (e.g. due to privacy, ethical, or legal restrictions).
+9. If a dataset is mentioned but the paper does NOT state whether it is available or how to access it, classify its status as "not_reported" (or "unclear"), NEVER "not_available".
+10. No relevant data availability statement found in the supplied chunks -> "not_reported".
+11. Contradictory, ambiguous, or insufficient evidence -> "unclear".
+12. If different datasets have materially different access statuses, represent each dataset separately in the "datasets" list and set "overall_status" to "mixed".
+13. Provide verbatim evidence quotes copied EXACTLY from the supplied chunks, identifying the source chunk ID.
+14. Never invent URLs, accessions, repositories, quotes, or access conditions.
+15. If a dataset has an explicit accession number (e.g., SRA:SRP004777, GSE12345) or public repository/URL, classify its status as "publicly_available" (not "not_reported" or "not_available").
 
 JSON SCHEMA:
 {

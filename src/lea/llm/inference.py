@@ -56,7 +56,16 @@ class TechnicalSummarizer:
                 logger.warning(f"Unexpected error during data availability extraction: {exc}")
                 last_error = exc
 
-        raise SummaryValidationError(f"Failed to generate valid DataAvailabilityAssessment after {self.max_attempts} attempts: {last_error}")
+        logger.warning(
+            f"Failed to generate valid DataAvailabilityAssessment for '{title}' after {self.max_attempts} attempts: {last_error}. "
+            f"Falling back to NOT_REPORTED assessment."
+        )
+        return DataAvailabilityAssessment(
+            overall_status=PaperAvailabilityStatus.NOT_REPORTED,
+            datasets=[],
+            rationale=f"Data availability extraction failed validation after {self.max_attempts} attempts ({last_error}). Defaulted to not_reported.",
+            verification_status=VerificationStatus.NOT_CHECKED
+        )
 
     def summarize_candidate(
         self,
