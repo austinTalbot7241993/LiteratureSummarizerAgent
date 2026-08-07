@@ -24,6 +24,6 @@ def test_dense_vector_search(test_db_session):
     chunk1 = repo.add_chunk(paper_id=paper.id, run_id=run.id, chunk_type="child", content="Positive vector chunk", chunk_index=1, token_count=10, embedding=v1)
     chunk2 = repo.add_chunk(paper_id=paper.id, run_id=run.id, chunk_type="child", content="Negative vector chunk", chunk_index=2, token_count=10, embedding=v2)
 
-    results = repo.search_dense_vector(run.id, v1, top_k=2)
+    results = repo.search_dense_vector(run.id, paper.id, v1, top_k=2)
     assert len(results) == 2
     assert results[0].content == "Positive vector chunk"

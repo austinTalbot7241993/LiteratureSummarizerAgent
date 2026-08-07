@@ -417,7 +417,7 @@ def summarize(
             console.print("[bold red]ERROR: CUDA GPU acceleration is required for LLM summarization, but PyTorch CUDA is not available![/bold red]")
             console.print("[yellow]To run real LLM inference with Qwen 2.5 7B on your RTX 2080 Ti, install PyTorch compiled for CUDA 12.1 (+cu121).[/yellow]")
             console.print("[yellow]If you explicitly want mock summaries for testing without GPU, re-run with --mock.[/yellow]")
-            raise typer.Exit(code=1)
+            from lea.rag.availability_retrieval import retrieve_data_availability_context
 
         summarizer = TechnicalSummarizer(backend=backend, max_attempts=config.llm.generation_attempts)
 
@@ -427,7 +427,7 @@ def summarize(
                 if config.acquisition.require_downloaded_pdf:
                     logger.info(f"Skipping summarization for '{p.title}' - no downloaded PDF available")
                     continue
-            # Fetch targeted chunks for both methodology and empirical findings
+            # Fetch targeted chunks for methodology and empirical findings
             retrieved_methodology = hybrid_engine.hybrid_search(
                 repo=repo,
                 run_id=r_uuid,
@@ -456,9 +456,16 @@ def summarize(
                     seen_cids.add(cid)
                     retrieved_chunks.append(chunk_obj)
 
+            # Dedicated data availability retrieval
+            availability_chunks = retrieve_data_availability_context(repo, r_uuid, p.id)
+
             cand_meta = {"title": p.title, "authors": p.authors, "publication_year": p.publication_year}
 
-            tech_summary = summarizer.summarize_candidate(cand_meta, retrieved_chunks)
+            tech_summary, assessment = summarizer.summarize_candidate(
+                cand_meta,
+                retrieved_chunks,
+                availability_chunks=availability_chunks
+            )
             repo.add_summary(
                 run_id=r_uuid,
                 candidate_paper_id=cand.id,
@@ -466,8 +473,9 @@ def summarize(
                 methodological_novelty=tech_summary.methodological_novelty,
                 empirical_findings=tech_summary.empirical_findings,
                 paragraph_summary=tech_summary.paragraph_summary,
-                data_availability=tech_summary.data_availability,
+                data_availability=assessment.overall_status.value if hasattr(assessment.overall_status, "value") else str(assessment.overall_status),
                 data_location=tech_summary.data_location,
+                data_availability_assessment=assessment.model_dump(mode="json"),
                 model_name=config.llm.model
             )
 

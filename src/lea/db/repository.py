@@ -93,7 +93,19 @@ class LEARepository:
         return self.session.query(CandidatePaper).filter(CandidatePaper.id == candidate_id).first()
 
     # --- Text Chunks ---
-    def add_chunk(self, paper_id: uuid.UUID, run_id: uuid.UUID, chunk_type: str, content: str, chunk_index: int, token_count: int, parent_id: Optional[uuid.UUID] = None, embedding: Optional[List[float]] = None) -> TextChunk:
+    def add_chunk(
+        self,
+        paper_id: uuid.UUID,
+        run_id: uuid.UUID,
+        chunk_type: str,
+        content: str,
+        chunk_index: int,
+        token_count: int,
+        parent_id: Optional[uuid.UUID] = None,
+        embedding: Optional[List[float]] = None,
+        section_title: Optional[str] = None,
+        page_number: Optional[int] = None
+    ) -> TextChunk:
         clean_content = self._clean_str(content)
         chunk = TextChunk(
             paper_id=paper_id,
@@ -103,6 +115,8 @@ class LEARepository:
             content=clean_content,
             chunk_index=chunk_index,
             token_count=token_count,
+            section_title=section_title,
+            page_number=page_number,
             embedding=embedding
         )
         self.session.add(chunk)
@@ -121,18 +135,26 @@ class LEARepository:
             query = query.filter(TextChunk.chunk_type == chunk_type)
         return query.order_by(TextChunk.chunk_index.asc()).all()
 
-    def search_dense_vector(self, run_id: uuid.UUID, query_embedding: List[float], top_k: int = 30) -> List[TextChunk]:
+    def search_dense_vector(
+        self,
+        run_id: uuid.UUID,
+        paper_id: uuid.UUID,
+        query_embedding: List[float],
+        top_k: int = 30
+    ) -> List[TextChunk]:
         # Perform cosine distance vector search using pgvector operator (<=>)
         # Fallback to python distance calculation if not pgvector engine
         try:
             stmt = select(TextChunk).where(
                 TextChunk.run_id == run_id,
-                TextChunk.chunk_type == "child"
+                TextChunk.paper_id == paper_id,
+                TextChunk.chunk_type == "child",
+                TextChunk.embedding.isnot(None)
             ).order_by(TextChunk.embedding.cosine_distance(query_embedding)).limit(top_k)
             return self.session.scalars(stmt).all()
         except Exception:
             # Python fallback if pgvector operator fails (e.g. SQLite test mode)
-            chunks = self.get_chunks_for_run(run_id, chunk_type="child")
+            chunks = self.get_chunks_for_paper(paper_id, run_id, chunk_type="child")
             # Filter chunks with embeddings
             valid_chunks = [c for c in chunks if c.embedding is not None]
             if not valid_chunks:
@@ -142,7 +164,7 @@ class LEARepository:
             def sim(c):
                 c_vec = np.array(c.embedding)
                 denom = (np.linalg.norm(q_vec) * np.linalg.norm(c_vec))
-                return np.dot(q_vec, c_vec) / denom if denom > 0 else 0
+                return float(np.dot(q_vec, c_vec) / denom) if denom > 0 else 0.0
             valid_chunks.sort(key=sim, reverse=True)
             return valid_chunks[:top_k]
 
@@ -156,8 +178,9 @@ class LEARepository:
         empirical_findings: str,
         paragraph_summary: str,
         model_name: str,
-        data_availability: str = "proprietary",
-        data_location: Optional[str] = None
+        data_availability: str,
+        data_location: Optional[str] = None,
+        data_availability_assessment: Optional[Dict[str, Any]] = None
     ) -> TechnicalSummaryModel:
         summary = TechnicalSummaryModel(
             run_id=run_id,
@@ -168,6 +191,7 @@ class LEARepository:
             paragraph_summary=paragraph_summary,
             data_availability=data_availability,
             data_location=data_location,
+            data_availability_assessment=data_availability_assessment,
             model_name=model_name
         )
         self.session.add(summary)

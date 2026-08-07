@@ -103,6 +103,8 @@ class TextChunk(Base):
     content = Column(Text, nullable=False)
     chunk_index = Column(Integer, nullable=False)
     token_count = Column(Integer, nullable=False)
+    section_title = Column(Text, nullable=True)
+    page_number = Column(Integer, nullable=True)
     embedding = Column(Vector(1024), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
@@ -120,10 +122,12 @@ class TechnicalSummaryModel(Base):
     methodological_novelty = Column(Text, nullable=False)
     empirical_findings = Column(Text, nullable=False)
     paragraph_summary = Column(Text, nullable=False)
-    data_availability = Column(String(50), nullable=False, default="proprietary")
+    data_availability = Column(String(50), nullable=False)
     data_location = Column(Text, nullable=True)
+    data_availability_assessment = Column(JSONType, nullable=True)
     model_name = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     run = relationship("DiscoveryRun", back_populates="summaries")
     candidate_paper = relationship("CandidatePaper", back_populates="summary")
+

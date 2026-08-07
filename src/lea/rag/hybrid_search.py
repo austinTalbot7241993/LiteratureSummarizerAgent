@@ -54,8 +54,7 @@ class HybridSearchEngine:
         fused_top_k: int = 8
     ) -> List[Tuple[Dict[str, Any], float]]:
         # 1. Fetch dense vector results for candidate paper
-        dense_results = self.dense_engine.search(repo, run_id, query_text, top_k=dense_top_k)
-        # Filter dense results for this specific candidate paper
+        dense_results = self.dense_engine.search(repo, run_id, paper_id, query_text, top_k=dense_top_k)
         paper_dense = [item for item in dense_results if str(item[0].get("paper_id")) == str(paper_id)]
 
         # 2. Build BM25 index over candidate paper child chunks
@@ -69,7 +68,9 @@ class HybridSearchEngine:
                 "parent_id": str(c.parent_id) if c.parent_id else None,
                 "content": c.content,
                 "chunk_index": c.chunk_index,
-                "token_count": c.token_count
+                "token_count": c.token_count,
+                "section_title": getattr(c, "section_title", None),
+                "page_number": getattr(c, "page_number", None)
             }
             for c in chunks
         ]

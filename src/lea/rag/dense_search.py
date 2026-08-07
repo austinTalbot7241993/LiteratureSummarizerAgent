@@ -6,13 +6,13 @@ class DenseSearchEngine:
     def __init__(self, embedder: BGEEmbedder):
         self.embedder = embedder
 
-    def search(self, repo: LEARepository, run_id, query_text: str, top_k: int = 30) -> List[Tuple[Dict[str, Any], float]]:
+    def search(self, repo: LEARepository, run_id, paper_id, query_text: str, top_k: int = 30) -> List[Tuple[Dict[str, Any], float]]:
         query_embeddings = self.embedder.embed_texts([query_text])
         if not query_embeddings:
             return []
         q_vec = query_embeddings[0]
 
-        chunk_models = repo.search_dense_vector(run_id, q_vec, top_k=top_k)
+        chunk_models = repo.search_dense_vector(run_id, paper_id, q_vec, top_k=top_k)
         results = []
         for c in chunk_models:
             chunk_dict = {
@@ -23,7 +23,9 @@ class DenseSearchEngine:
                 "parent_id": str(c.parent_id) if c.parent_id else None,
                 "content": c.content,
                 "chunk_index": c.chunk_index,
-                "token_count": c.token_count
+                "token_count": c.token_count,
+                "section_title": getattr(c, "section_title", None),
+                "page_number": getattr(c, "page_number", None)
             }
             results.append((chunk_dict, 1.0)) # Rank-ordered
         return results

@@ -60,8 +60,9 @@ class HTMLReportExporter:
                     "methodological_novelty": summary.methodological_novelty,
                     "empirical_findings": summary.empirical_findings,
                     "paragraph_summary": summary.paragraph_summary,
-                    "data_availability": getattr(summary, "data_availability", "proprietary"),
-                    "data_location": getattr(summary, "data_location", None)
+                    "data_availability": getattr(summary, "data_availability", "unclear"),
+                    "data_location": getattr(summary, "data_location", None),
+                    "data_availability_assessment": getattr(summary, "data_availability_assessment", None)
                 }
 
             items.append({
