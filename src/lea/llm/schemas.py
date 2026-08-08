@@ -163,6 +163,11 @@ class TechnicalSummary(BaseModel):
         min_length=1,
         description="Single-paragraph technical synthesis of at most 300 words",
     )
+    relationship_to_target: str = Field(
+        default="Related literature candidate.",
+        min_length=1,
+        description="Description of how this paper relates to the target input paper",
+    )
     data_availability: PaperAvailabilityStatus = Field(
         description="Data availability status: publicly_available, restricted, not_available, not_reported, unclear, or mixed",
     )

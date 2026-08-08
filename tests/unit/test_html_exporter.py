@@ -26,7 +26,8 @@ def test_html_report_rendering(tmp_path):
                     "problem_formulation": "Problem statement",
                     "methodological_novelty": "Novel algorithm",
                     "empirical_findings": "High performance",
-                    "paragraph_summary": "Single paragraph technical synthesis."
+                    "paragraph_summary": "Single paragraph technical synthesis.",
+                    "relationship_to_target": "Direct extension of base input paper."
                 },
                 "bibtex": "@article{doe2023discovered, title={Discovered Candidate Paper}}"
             }
@@ -36,4 +37,6 @@ def test_html_report_rendering(tmp_path):
     assert "Test Exploration Report" in html
     assert "Discovered Candidate Paper" in html
     assert "Single paragraph technical synthesis." in html
+    assert "Relationship to Target Paper" in html
+    assert "Direct extension of base input paper." in html
     assert "@article{doe2023discovered" in html

@@ -17,6 +17,9 @@ Evaluation on the 1kGP cohort demonstrates higher haplotype accuracy compared to
 
 TECHNICAL SYNTHESIS:
 This paper presents a scalable framework for rare-variant aware genome inference using pangenome graphs and consensus polishing.
+
+RELATIONSHIP TO TARGET PAPER:
+Direct extension of the target input paper methodology for larger population cohorts.
 """
     summary = backend.generate_summary(
         system_prompt=SUMMARY_SYSTEM_PROMPT,
@@ -24,6 +27,7 @@ This paper presents a scalable framework for rare-variant aware genome inference
             title="Genome Inference",
             authors="Test Authors",
             year=2024,
+            target_title="Target Input Paper",
             context_text="Sample paper text."
         )
     )
@@ -31,10 +35,11 @@ This paper presents a scalable framework for rare-variant aware genome inference
     assert len(summary.methodological_novelty) > 10
     assert len(summary.empirical_findings) > 10
     assert len(summary.paragraph_summary) > 10
+    assert len(summary.relationship_to_target) > 5
 
 
 def test_missing_section_fails_loudly():
-    # If the model fails to output one of the 4 required sections, it MUST raise SummaryValidationError
+    # If the model fails to output one of the 5 required sections, it MUST raise SummaryValidationError
     raw_missing_empirical = """
 PROBLEM FORMULATION:
 We address high-dimensional matrix estimation.
@@ -48,10 +53,11 @@ This paper presents a fast spectral thresholding method for matrix estimation.
     # Simulate LLM backend section validation
     import re
     patterns = {
-        "problem_formulation": r"(?:PROBLEM FORMULATION|PROBLEM STATEMENT|PROBLEM)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:METHODOLOGICAL NOVELTY|METHODOLOGY|EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
-        "methodological_novelty": r"(?:METHODOLOGICAL NOVELTY|METHODOLOGY|NOVELTY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
-        "empirical_findings": r"(?:EMPIRICAL FINDINGS|RESULTS|EMPIRICAL EVALUATION)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:|\s*$)",
-        "paragraph_summary": r"(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:\s*(.*?)(?=\s*$)"
+        "problem_formulation": r"(?:PROBLEM FORMULATION|PROBLEM STATEMENT|PROBLEM)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:METHODOLOGICAL NOVELTY|METHODOLOGY|EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS|RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET)\s*:|\s*$)",
+        "methodological_novelty": r"(?:METHODOLOGICAL NOVELTY|METHODOLOGY|NOVELTY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS|RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET)\s*:|\s*$)",
+        "empirical_findings": r"(?:EMPIRICAL FINDINGS|RESULTS|EMPIRICAL EVALUATION)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY|RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET)\s*:|\s*$)",
+        "paragraph_summary": r"(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET|RELATIONSHIP TO INPUT PAPER|RELATIONSHIP)\s*:|\s*$)",
+        "relationship_to_target": r"(?:RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET|RELATIONSHIP TO INPUT PAPER|RELATIONSHIP)\s*:\s*(.*?)(?=\s*$)"
     }
     parsed = {}
     for key, pat in patterns.items():
@@ -59,5 +65,6 @@ This paper presents a fast spectral thresholding method for matrix estimation.
         if m and len(m.group(1).strip()) > 5:
             parsed[key] = m.group(1).strip()
 
-    missing = [k for k in ["problem_formulation", "methodological_novelty", "empirical_findings", "paragraph_summary"] if k not in parsed]
+    missing = [k for k in ["problem_formulation", "methodological_novelty", "empirical_findings", "paragraph_summary", "relationship_to_target"] if k not in parsed]
     assert "empirical_findings" in missing
+    assert "relationship_to_target" in missing

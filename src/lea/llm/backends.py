@@ -101,11 +101,15 @@ class MockLLMBackend(BaseLLMBackend):
         status = status_map.get(self.preset, PaperAvailabilityStatus.PUBLICLY_AVAILABLE)
         location = "https://www.internationalgenome.org" if status == PaperAvailabilityStatus.PUBLICLY_AVAILABLE else None
 
+        match_target = re.search(r"Target Input Paper:\s*(.+)", user_prompt)
+        target_title = match_target.group(1).strip() if match_target else "Target Input Paper"
+
         return TechnicalSummary(
             problem_formulation=f"Formulates scientific evaluation for paper '{title}'.",
             methodological_novelty="Introduces a novel hybrid retrieval and citation exclusion methodology.",
             empirical_findings="Achieves quantifiable empirical performance improvements across benchmarks.",
             paragraph_summary=f"This paper '{title}' proposes a novel technical methodology addressing key challenges in literature synthesis.",
+            relationship_to_target=f"Compares with target input paper '{target_title}' as a complementary approach and benchmark reference.",
             data_availability=status,
             data_location=location
         )
@@ -351,16 +355,17 @@ class TransformersPeftBackend(BaseLLMBackend):
         cleaned = clean_json_response(raw_response)
         try:
             data = json.loads(cleaned)
-            if isinstance(data, dict) and all(k in data for k in ["problem_formulation", "methodological_novelty", "empirical_findings", "paragraph_summary"]):
+            if isinstance(data, dict) and all(k in data for k in ["problem_formulation", "methodological_novelty", "empirical_findings", "paragraph_summary", "relationship_to_target"]):
                 return TechnicalSummary(**data)
         except Exception:
             pass
 
         patterns = {
-            "problem_formulation": r"(?:PROBLEM FORMULATION|PROBLEM STATEMENT|PROBLEM)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:METHODOLOGICAL NOVELTY|METHODOLOGY|EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
-            "methodological_novelty": r"(?:METHODOLOGICAL NOVELTY|METHODOLOGY|NOVELTY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS)\s*:|\s*$)",
-            "empirical_findings": r"(?:EMPIRICAL FINDINGS|RESULTS|EMPIRICAL EVALUATION)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:|\s*$)",
-            "paragraph_summary": r"(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:\s*(.*?)(?=\s*$)"
+            "problem_formulation": r"(?:PROBLEM FORMULATION|PROBLEM STATEMENT|PROBLEM)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:METHODOLOGICAL NOVELTY|METHODOLOGY|EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS|RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET)\s*:|\s*$)",
+            "methodological_novelty": r"(?:METHODOLOGICAL NOVELTY|METHODOLOGY|NOVELTY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:EMPIRICAL FINDINGS|RESULTS|TECHNICAL SYNTHESIS|SYNTHESIS|RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET)\s*:|\s*$)",
+            "empirical_findings": r"(?:EMPIRICAL FINDINGS|RESULTS|EMPIRICAL EVALUATION)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY|RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET)\s*:|\s*$)",
+            "paragraph_summary": r"(?:TECHNICAL SYNTHESIS|SYNTHESIS|SUMMARY)\s*:\s*(.*?)(?=\n\s*(?:\*\*|\#\#|\#)?\s*(?:RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET|RELATIONSHIP TO INPUT PAPER|RELATIONSHIP)\s*:|\s*$)",
+            "relationship_to_target": r"(?:RELATIONSHIP TO TARGET PAPER|RELATIONSHIP TO TARGET|RELATIONSHIP TO INPUT PAPER|RELATIONSHIP)\s*:\s*(.*?)(?=\s*$)"
         }
 
         parsed_fields = {}
@@ -372,7 +377,7 @@ class TransformersPeftBackend(BaseLLMBackend):
                 if len(val_clean) > 5:
                     parsed_fields[key] = val_clean
 
-        missing = [k for k in ["problem_formulation", "methodological_novelty", "empirical_findings", "paragraph_summary"] if k not in parsed_fields]
+        missing = [k for k in ["problem_formulation", "methodological_novelty", "empirical_findings", "paragraph_summary", "relationship_to_target"] if k not in parsed_fields]
         if missing:
             raise SummaryValidationError(
                 f"LLM output failed to produce required section(s) {missing} for paper '{t_str}'. "

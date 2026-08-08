@@ -27,6 +27,7 @@ def test_real_pdf_extraction_and_prompt_formatting():
         title="Scalable and rare-variant aware genome inference across the 1kGP cohort",
         authors="Genome Research Group",
         year=2024,
+        target_title="Target Input Paper",
         context_text=context_text
     )
 
@@ -34,6 +35,7 @@ def test_real_pdf_extraction_and_prompt_formatting():
     assert "METHODOLOGICAL NOVELTY:" in SUMMARY_SYSTEM_PROMPT
     assert "EMPIRICAL FINDINGS:" in SUMMARY_SYSTEM_PROMPT
     assert "TECHNICAL SYNTHESIS:" in SUMMARY_SYSTEM_PROMPT
+    assert "RELATIONSHIP TO TARGET PAPER:" in SUMMARY_SYSTEM_PROMPT
     assert len(user_prompt) > 200
 
 def test_real_gpu_llm_inference():
@@ -48,6 +50,7 @@ def test_real_gpu_llm_inference():
         title="Scalable and rare-variant aware genome inference across the 1kGP cohort",
         authors="Genome Research Group",
         year=2024,
+        target_title="Target Input Paper",
         context_text=context_text
     )
 
@@ -58,11 +61,12 @@ def test_real_gpu_llm_inference():
         user_prompt=user_prompt
     )
 
-    # Verify all 4 sections were generated and parsed cleanly from Qwen
+    # Verify all 5 sections were generated and parsed cleanly from Qwen
     assert len(summary.problem_formulation) > 15
     assert len(summary.methodological_novelty) > 15
     assert len(summary.empirical_findings) > 15
     assert len(summary.paragraph_summary) > 15
+    assert len(summary.relationship_to_target) > 15
 
     # Ensure zero hardcoded placeholder strings exist in summary
     assert "Formulates problem statement for" not in summary.problem_formulation

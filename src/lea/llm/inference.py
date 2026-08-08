@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional, Tuple
-from lea.llm.schemas import TechnicalSummary, DataAvailabilityAssessment, PaperAvailabilityStatus
+from lea.llm.schemas import TechnicalSummary, DataAvailabilityAssessment, PaperAvailabilityStatus, VerificationStatus
 from lea.llm.backends import BaseLLMBackend, MockLLMBackend
 from lea.rag.prompts import (
     SUMMARY_SYSTEM_PROMPT,
@@ -71,11 +71,13 @@ class TechnicalSummarizer:
         self,
         candidate_meta: Dict[str, Any],
         retrieved_chunks: List[Dict[str, Any]],
-        availability_chunks: Optional[List[Dict[str, Any]]] = None
+        availability_chunks: Optional[List[Dict[str, Any]]] = None,
+        target_paper_meta: Optional[Dict[str, Any]] = None
     ) -> Tuple[TechnicalSummary, DataAvailabilityAssessment]:
         title = candidate_meta.get("title", "Untitled")
         authors = ", ".join(candidate_meta.get("authors", [])) or "Unknown"
         year = str(candidate_meta.get("publication_year") or candidate_meta.get("year") or "N/A")
+        target_title = (target_paper_meta or {}).get("title") or candidate_meta.get("target_title") or "Target Input Paper"
 
         chunk_texts = [
             f"[CHUNK id={c.get('id', i+1)} index={c.get('chunk_index', i+1)}]\n{c.get('content')}"
@@ -87,6 +89,7 @@ class TechnicalSummarizer:
             title=title,
             authors=authors,
             year=year,
+            target_title=target_title,
             context_text=context_text
         )
 
@@ -105,8 +108,9 @@ class TechnicalSummarizer:
                         title=title,
                         authors=authors,
                         year=year,
+                        target_title=target_title,
                         context_text=c_str
-                    ) + "\n\nCRITICAL RETRY DIRECTIVE: You MUST output all 4 section headers: PROBLEM FORMULATION:, METHODOLOGICAL NOVELTY:, EMPIRICAL FINDINGS:, TECHNICAL SYNTHESIS:."
+                    ) + "\n\nCRITICAL RETRY DIRECTIVE: You MUST output all 5 section headers: PROBLEM FORMULATION:, METHODOLOGICAL NOVELTY:, EMPIRICAL FINDINGS:, TECHNICAL SYNTHESIS:, RELATIONSHIP TO TARGET PAPER:."
 
                 logger.info(f"Generating summary for '{title}' (Attempt {attempt}/{self.max_attempts})...")
                 summary = self.backend.generate_summary(SUMMARY_SYSTEM_PROMPT, user_prompt)

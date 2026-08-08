@@ -35,6 +35,7 @@ def test_user_prompt_template_places_directives_before_context():
         title="Test Title",
         authors="Test Author",
         year="2024",
+        target_title="Target Input Paper",
         context_text="Sample context"
     )
     format_idx = formatted.index("REQUIRED FORMAT:")
@@ -44,6 +45,7 @@ def test_user_prompt_template_places_directives_before_context():
     assert "METHODOLOGICAL NOVELTY:" in formatted
     assert "EMPIRICAL FINDINGS:" in formatted
     assert "TECHNICAL SYNTHESIS:" in formatted
+    assert "RELATIONSHIP TO TARGET PAPER:" in formatted
 
 def test_summarizer_retry_reduces_context_and_adds_directive():
     backend = FailingFirstAttemptBackend()

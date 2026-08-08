@@ -58,6 +58,7 @@ def create_tables(engine=None):
     with engine.connect() as conn:
         is_sqlite = engine.dialect.name == "sqlite"
         summary_columns = [
+            ("relationship_to_target", "TEXT"),
             ("data_availability", "VARCHAR(50)"),
             ("data_location", "TEXT"),
             ("data_availability_assessment", "JSONB" if not is_sqlite else "JSON")

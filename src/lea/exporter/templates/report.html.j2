@@ -325,10 +325,16 @@
                         {% endif %}
                     </div>
                 </div>
-                <div class="summary-field" style="margin-bottom: 0;">
+                <div class="summary-field">
                     <label>Technical Synthesis</label>
                     <p class="paragraph-summary">{{ item.summary.paragraph_summary }}</p>
                 </div>
+                {% if item.summary.relationship_to_target %}
+                <div class="summary-field" style="margin-bottom: 0;">
+                    <label>Relationship to Target Paper</label>
+                    <div>{{ item.summary.relationship_to_target }}</div>
+                </div>
+                {% endif %}
             </div>
             {% else %}
             <p style="color: var(--text-muted); font-size: 0.9rem; font-style: italic; margin: 1rem 0;">Abstract-only overview available. LLM technical summary pending.</p>
