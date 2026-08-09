@@ -460,12 +460,16 @@ def summarize(
             # Dedicated data availability retrieval
             availability_chunks = retrieve_data_availability_context(repo, r_uuid, p.id)
 
+            input_paper = run.input_paper
+            input_paper_meta = {"title": input_paper.title} if input_paper else None
+
             cand_meta = {"title": p.title, "authors": p.authors, "publication_year": p.publication_year}
 
             tech_summary, assessment = summarizer.summarize_candidate(
                 cand_meta,
                 retrieved_chunks,
-                availability_chunks=availability_chunks
+                availability_chunks=availability_chunks,
+                target_paper_meta=input_paper_meta
             )
             repo.add_summary(
                 run_id=r_uuid,
@@ -474,6 +478,7 @@ def summarize(
                 methodological_novelty=tech_summary.methodological_novelty,
                 empirical_findings=tech_summary.empirical_findings,
                 paragraph_summary=tech_summary.paragraph_summary,
+                relationship_to_target=tech_summary.relationship_to_target,
                 data_availability=assessment.overall_status.value if hasattr(assessment.overall_status, "value") else str(assessment.overall_status),
                 data_location=tech_summary.data_location,
                 data_availability_assessment=assessment.model_dump(mode="json"),

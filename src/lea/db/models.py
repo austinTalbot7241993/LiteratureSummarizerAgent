@@ -122,6 +122,7 @@ class TechnicalSummaryModel(Base):
     methodological_novelty = Column(Text, nullable=False)
     empirical_findings = Column(Text, nullable=False)
     paragraph_summary = Column(Text, nullable=False)
+    relationship_to_target = Column(Text, nullable=True)
     data_availability = Column(String(50), nullable=False)
     data_location = Column(Text, nullable=True)
     data_availability_assessment = Column(JSONType, nullable=True)

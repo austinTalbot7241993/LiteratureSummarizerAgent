@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS technical_summaries (
     methodological_novelty TEXT NOT NULL,
     empirical_findings TEXT NOT NULL,
     paragraph_summary TEXT NOT NULL,
+    relationship_to_target TEXT,
     data_availability VARCHAR(50) NOT NULL,
     data_location TEXT,
     data_availability_assessment JSONB,

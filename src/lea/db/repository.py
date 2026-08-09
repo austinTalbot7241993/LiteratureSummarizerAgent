@@ -179,6 +179,7 @@ class LEARepository:
         paragraph_summary: str,
         model_name: str,
         data_availability: str,
+        relationship_to_target: Optional[str] = None,
         data_location: Optional[str] = None,
         data_availability_assessment: Optional[Dict[str, Any]] = None
     ) -> TechnicalSummaryModel:
@@ -189,6 +190,7 @@ class LEARepository:
             methodological_novelty=methodological_novelty,
             empirical_findings=empirical_findings,
             paragraph_summary=paragraph_summary,
+            relationship_to_target=relationship_to_target,
             data_availability=data_availability,
             data_location=data_location,
             data_availability_assessment=data_availability_assessment,

@@ -8,6 +8,7 @@ def test_gpu_inference_smoke():
         title="Sample Paper",
         authors="Sample Author",
         year=2024,
+        target_title="Target Input Paper",
         context_text="This paper introduces a novel approach for literature exploration."
     )
     summary = backend.generate_summary(

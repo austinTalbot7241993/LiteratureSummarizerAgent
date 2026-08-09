@@ -1,4 +1,4 @@
-SUMMARY_SYSTEM_PROMPT = """You are an expert academic paper analyzer. Analyze the provided research paper excerpts and synthesize a technical summary structured into four distinct labeled sections.
+SUMMARY_SYSTEM_PROMPT = """You are an expert academic paper analyzer. Analyze the provided research paper excerpts and synthesize a technical summary structured into five distinct labeled sections.
 
 You MUST use the exact section headers below:
 
@@ -14,6 +14,9 @@ EMPIRICAL FINDINGS:
 TECHNICAL SYNTHESIS:
 [Write a comprehensive single-paragraph technical summary of at most 300 words]
 
+RELATIONSHIP TO TARGET PAPER:
+[Write a concise description of how this paper relates to the target input paper, e.g., direct extension, alternative baseline, orthogonal approach, or foundational theory]
+
 CRITICAL RULES:
 1. "TECHNICAL SYNTHESIS:" must be a single continuous paragraph without newline breaks.
 2. "TECHNICAL SYNTHESIS:" must contain AT MOST 300 words.
@@ -23,12 +26,14 @@ CRITICAL RULES:
 SUMMARY_USER_PROMPT_TEMPLATE = """Paper Title: {title}
 Authors: {authors}
 Publication Year: {year}
+Target Input Paper: {target_title}
 
-REQUIRED FORMAT: You MUST format your response into the 4 required labeled section headers below:
+REQUIRED FORMAT: You MUST format your response into the 5 required labeled section headers below:
 PROBLEM FORMULATION:
 METHODOLOGICAL NOVELTY:
 EMPIRICAL FINDINGS:
 TECHNICAL SYNTHESIS:
+RELATIONSHIP TO TARGET PAPER:
 
 Retrieved Context Chunks:
 {context_text}
