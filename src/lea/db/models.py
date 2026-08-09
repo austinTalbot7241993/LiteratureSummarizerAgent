@@ -85,6 +85,9 @@ class CandidatePaper(Base):
     open_access_url = Column(Text, nullable=True)
     pdf_path = Column(Text, nullable=True)
     is_downloaded = Column(Boolean, default=False)
+    abstract_relevance_score = Column(Float, nullable=True)
+    abstract_relevance_tier = Column(String(20), nullable=True)
+    abstract_relevance_reasoning = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     run = relationship("DiscoveryRun", back_populates="candidates")

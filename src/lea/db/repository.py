@@ -72,7 +72,19 @@ class LEARepository:
         return run
 
     # --- Candidate Papers ---
-    def add_candidate_paper(self, run_id: uuid.UUID, paper_id: uuid.UUID, score: float = 0.0, rrf_rank: Optional[int] = None, source_apis: Optional[List[str]] = None, open_access_url: Optional[str] = None, pdf_path: Optional[str] = None) -> CandidatePaper:
+    def add_candidate_paper(
+        self,
+        run_id: uuid.UUID,
+        paper_id: uuid.UUID,
+        score: float = 0.0,
+        rrf_rank: Optional[int] = None,
+        source_apis: Optional[List[str]] = None,
+        open_access_url: Optional[str] = None,
+        pdf_path: Optional[str] = None,
+        abstract_relevance_score: Optional[float] = None,
+        abstract_relevance_tier: Optional[str] = None,
+        abstract_relevance_reasoning: Optional[str] = None
+    ) -> CandidatePaper:
         candidate = CandidatePaper(
             run_id=run_id,
             paper_id=paper_id,
@@ -80,7 +92,10 @@ class LEARepository:
             rrf_rank=rrf_rank,
             source_apis=source_apis or [],
             open_access_url=self._clean_str(open_access_url),
-            pdf_path=self._clean_str(pdf_path)
+            pdf_path=self._clean_str(pdf_path),
+            abstract_relevance_score=abstract_relevance_score,
+            abstract_relevance_tier=self._clean_str(abstract_relevance_tier),
+            abstract_relevance_reasoning=self._clean_str(abstract_relevance_reasoning)
         )
         self.session.add(candidate)
         self.session.flush()

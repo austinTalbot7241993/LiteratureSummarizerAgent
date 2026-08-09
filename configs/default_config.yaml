@@ -29,6 +29,15 @@ discovery:
   title_similarity_threshold: 0.96
   year_tolerance: 1
 
+  # Abstract-based relevance screening settings
+  screening:
+    enabled: true
+    method: "llm"                    # Options: "llm", "embedding"
+    pre_screening_limit: 50           # Fetch top 50 candidates from APIs for screening
+    min_relevance_score: 6.0          # Minimum relevance score (0-10) to pass filter
+    max_screened_candidates: 10       # Final candidate budget passed to acquire step
+    fallback_on_missing_abstract: pass # Options: "pass" (keep candidate), "drop"
+
 acquisition:
   download_open_access_pdfs: true
   require_downloaded_pdf: true
