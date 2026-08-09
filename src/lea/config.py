@@ -46,6 +46,14 @@ class ExtractionConfig(BaseModel):
     allow_openalex_reference_fallback: bool = True
     allow_incomplete_citation_exclusion: bool = False
 
+class ScreeningConfig(BaseModel):
+    enabled: bool = True
+    method: str = "llm"
+    pre_screening_limit: int = 50
+    min_relevance_score: float = 6.0
+    max_screened_candidates: int = 10
+    fallback_on_missing_abstract: str = "pass"
+
 class DiscoveryConfig(BaseModel):
     openalex_limit: int = 100
     semantic_scholar_limit: int = 100
@@ -53,6 +61,7 @@ class DiscoveryConfig(BaseModel):
     source_rrf_k: int = 60
     title_similarity_threshold: float = 0.96
     year_tolerance: int = 1
+    screening: ScreeningConfig = ScreeningConfig()
 
 class AcquisitionConfig(BaseModel):
     download_open_access_pdfs: bool = True

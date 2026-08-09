@@ -67,6 +67,11 @@ def create_tables(engine=None):
             ("section_title", "TEXT"),
             ("page_number", "INTEGER")
         ]
+        candidate_columns = [
+            ("abstract_relevance_score", "FLOAT"),
+            ("abstract_relevance_tier", "VARCHAR(20)"),
+            ("abstract_relevance_reasoning", "TEXT")
+        ]
 
         if is_sqlite:
             tech_info = [r[1] for r in conn.execute(text("PRAGMA table_info(technical_summaries);")).fetchall()]
@@ -90,6 +95,17 @@ def create_tables(engine=None):
                         logger.error(f"Failed to add column {col_name} to text_chunks: {exc}")
                         conn.rollback()
                         raise
+
+            cand_info = [r[1] for r in conn.execute(text("PRAGMA table_info(candidate_papers);")).fetchall()]
+            for col_name, col_type in candidate_columns:
+                if col_name not in cand_info:
+                    try:
+                        conn.execute(text(f"ALTER TABLE candidate_papers ADD COLUMN {col_name} {col_type};"))
+                        conn.commit()
+                    except Exception as exc:
+                        logger.error(f"Failed to add column {col_name} to candidate_papers: {exc}")
+                        conn.rollback()
+                        raise
         else:
             for col_name, col_type in summary_columns:
                 try:
@@ -106,6 +122,15 @@ def create_tables(engine=None):
                     conn.commit()
                 except Exception as exc:
                     logger.error(f"Failed to add column {col_name} to text_chunks: {exc}")
+                    conn.rollback()
+                    raise
+
+            for col_name, col_type in candidate_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE candidate_papers ADD COLUMN IF NOT EXISTS {col_name} {col_type};"))
+                    conn.commit()
+                except Exception as exc:
+                    logger.error(f"Failed to add column {col_name} to candidate_papers: {exc}")
                     conn.rollback()
                     raise
 

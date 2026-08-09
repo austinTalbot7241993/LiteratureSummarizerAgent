@@ -157,7 +157,12 @@ def ingest(pdf_path: str = typer.Argument(..., help="Path to input paper PDF")):
 
 
 @app.command()
-def discover(paper_id: str = typer.Argument(..., help="Paper UUID to discover related literature for")):
+def discover(
+    paper_id: str = typer.Argument(..., help="Paper UUID to discover related literature for"),
+    screen_abstracts: bool = typer.Option(True, "--screen-abstracts/--no-screen-abstracts", help="Enable or disable abstract-based relevance screening"),
+    screening_method: Optional[str] = typer.Option(None, "--screening-method", "--method", help="Abstract screening method ('llm' or 'embedding')"),
+    min_relevance: Optional[float] = typer.Option(None, "--min-relevance", "--min-score", help="Minimum abstract relevance score (0.0 - 10.0)")
+):
     """Discovers related literature excluding input paper and works in bibliography."""
     config = load_config()
     setup_logging(config.application.log_level)
@@ -192,7 +197,8 @@ def discover(paper_id: str = typer.Argument(..., help="Paper UUID to discover re
             "arxiv_id": paper.arxiv_id,
             "openalex_id": paper.openalex_id,
             "s2_id": paper.s2_id,
-            "publication_year": paper.publication_year
+            "publication_year": paper.publication_year,
+            "abstract": paper.abstract
         }
 
         # Create discovery run
@@ -207,7 +213,10 @@ def discover(paper_id: str = typer.Argument(..., help="Paper UUID to discover re
             cited_references=ref_dicts,
             exclusion_status=exclusion_status,
             final_candidate_limit=config.discovery.final_candidate_limit,
-            source_rrf_k=config.discovery.source_rrf_k
+            source_rrf_k=config.discovery.source_rrf_k,
+            screen_abstracts=screen_abstracts,
+            screening_method=screening_method,
+            min_relevance_score=min_relevance
         ))
 
         for cand_dict in candidates:
@@ -234,7 +243,10 @@ def discover(paper_id: str = typer.Argument(..., help="Paper UUID to discover re
                 score=cand_dict.get("rrf_score", 0.0),
                 rrf_rank=cand_dict.get("rrf_rank"),
                 source_apis=cand_dict.get("source_apis", []),
-                open_access_url=cand_dict.get("oa_pdf_url")
+                open_access_url=cand_dict.get("oa_pdf_url"),
+                abstract_relevance_score=cand_dict.get("abstract_relevance_score"),
+                abstract_relevance_tier=cand_dict.get("abstract_relevance_tier"),
+                abstract_relevance_reasoning=cand_dict.get("abstract_relevance_reasoning")
             )
 
         repo.update_discovery_run(run.id, run_status="discovered")
@@ -518,7 +530,10 @@ def report(
 def run(
     pdf_path: str = typer.Argument(..., help="Path to input paper PDF"),
     output: str = typer.Option("report.html", "--output", "-o", help="Path to output HTML report"),
-    allow_mock: bool = typer.Option(False, "--mock", help="Allow mock LLM backend fallback for testing without GPU")
+    allow_mock: bool = typer.Option(False, "--mock", help="Allow mock LLM backend fallback for testing without GPU"),
+    screen_abstracts: bool = typer.Option(True, "--screen-abstracts/--no-screen-abstracts", help="Enable or disable abstract-based relevance screening"),
+    screening_method: Optional[str] = typer.Option(None, "--screening-method", help="Abstract screening method ('llm' or 'embedding')"),
+    min_relevance: Optional[float] = typer.Option(None, "--min-relevance", help="Minimum abstract relevance score (0.0 - 10.0)")
 ):
     """Executes full end-to-end literature exploration pipeline."""
     console.print(f"[bold blue]Starting end-to-end LEA pipeline for paper {pdf_path}...[/bold blue]")
@@ -586,7 +601,12 @@ def run(
         paper_id = paper.id
 
     # Pipeline stages
-    discover(str(paper_id))
+    discover(
+        str(paper_id),
+        screen_abstracts=screen_abstracts,
+        screening_method=screening_method,
+        min_relevance=min_relevance
+    )
 
     # Retrieve created run_id
     with get_db_session() as session:

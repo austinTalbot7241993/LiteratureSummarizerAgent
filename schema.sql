@@ -64,8 +64,15 @@ CREATE TABLE IF NOT EXISTS candidate_papers (
     open_access_url TEXT,
     pdf_path TEXT,
     is_downloaded BOOLEAN DEFAULT FALSE,
+    abstract_relevance_score FLOAT DEFAULT NULL,
+    abstract_relevance_tier VARCHAR(20) DEFAULT NULL,
+    abstract_relevance_reasoning TEXT DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE candidate_papers ADD COLUMN IF NOT EXISTS abstract_relevance_score FLOAT DEFAULT NULL;
+ALTER TABLE candidate_papers ADD COLUMN IF NOT EXISTS abstract_relevance_tier VARCHAR(20) DEFAULT NULL;
+ALTER TABLE candidate_papers ADD COLUMN IF NOT EXISTS abstract_relevance_reasoning TEXT DEFAULT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_candidates_run_id ON candidate_papers (run_id);
 

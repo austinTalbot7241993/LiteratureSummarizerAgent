@@ -70,6 +70,9 @@ class BaseLLMBackend:
     def generate_data_availability(self, system_prompt: str, user_prompt: str) -> DataAvailabilityAssessment:
         raise NotImplementedError
 
+    def generate_abstract_relevance(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
 
 class MockLLMBackend(BaseLLMBackend):
     def __init__(
@@ -241,6 +244,15 @@ class MockLLMBackend(BaseLLMBackend):
                 ],
                 rationale="Data available upon reasonable request."
             )
+
+    def generate_abstract_relevance(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        if self.preset == "malformed":
+            raise SummaryValidationError("Mock backend configured to simulate malformed JSON output.")
+        return {
+            "relevance_score": 8.5,
+            "relevance_tier": "high",
+            "reasoning": "The candidate paper directly addresses the scientific methodology of the seed paper."
+        }
 
 
 class TransformersPeftBackend(BaseLLMBackend):
@@ -480,3 +492,34 @@ class TransformersPeftBackend(BaseLLMBackend):
                 raise SummaryValidationError(
                     f"Data availability extraction failed after repair retry: {exc2}. Raw repair output:\n{repair_response[:600]}"
                 )
+
+    def generate_abstract_relevance(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        self._load_model()
+        import torch
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        text_input = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = self._tokenizer(text_input, return_tensors="pt").to("cuda")
+
+        with torch.no_grad():
+            outputs = self._model.generate(
+                **inputs,
+                max_new_tokens=300,
+                do_sample=False
+            )
+
+        output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+        raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        del inputs, outputs
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        cleaned = clean_json_response(raw_response)
+        data = json.loads(cleaned)
+        if isinstance(data, dict) and "relevance_score" in data:
+            return data
+        raise ValueError(f"Invalid abstract relevance JSON response: {raw_response[:200]}")

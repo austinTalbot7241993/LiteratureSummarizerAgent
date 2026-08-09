@@ -70,7 +70,10 @@ class HTMLReportExporter:
                 "candidate": {
                     "score": cand.score,
                     "rrf_rank": cand.rrf_rank,
-                    "is_downloaded": cand.is_downloaded
+                    "is_downloaded": cand.is_downloaded,
+                    "abstract_relevance_score": getattr(cand, "abstract_relevance_score", None),
+                    "abstract_relevance_tier": getattr(cand, "abstract_relevance_tier", None),
+                    "abstract_relevance_reasoning": getattr(cand, "abstract_relevance_reasoning", None)
                 },
                 "paper": paper_dict,
                 "summary": summary_dict,

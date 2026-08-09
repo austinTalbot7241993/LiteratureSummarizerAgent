@@ -145,3 +145,84 @@ def test_missing_text_chunks_columns_auto_migrate(tmp_path):
         assert chunk.id is not None
         assert chunk.section_title == "Data Availability"
         assert chunk.page_number == 4
+
+
+def test_missing_candidate_papers_columns_auto_migrate(tmp_path):
+    from lea.db.session import init_db, get_db_session
+    db_path = tmp_path / "legacy_candidates.db"
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE papers (
+            id TEXT PRIMARY KEY,
+            sha256_hash TEXT UNIQUE NOT NULL,
+            title TEXT NOT NULL,
+            authors TEXT,
+            doi TEXT,
+            arxiv_id TEXT,
+            openalex_id TEXT,
+            s2_id TEXT,
+            publication_year INTEGER,
+            venue TEXT,
+            abstract TEXT,
+            pdf_path TEXT,
+            is_open_access INTEGER,
+            oa_pdf_url TEXT,
+            raw_bibtex TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        );
+    """)
+    cursor.execute("""
+        CREATE TABLE discovery_runs (
+            id TEXT PRIMARY KEY,
+            input_paper_id TEXT NOT NULL,
+            run_status TEXT NOT NULL,
+            exclusion_status TEXT NOT NULL,
+            created_at TEXT
+        );
+    """)
+    # Legacy candidate_papers table without abstract_relevance columns
+    cursor.execute("""
+        CREATE TABLE candidate_papers (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            paper_id TEXT NOT NULL,
+            score REAL,
+            rrf_rank INTEGER,
+            source_apis TEXT,
+            open_access_url TEXT,
+            pdf_path TEXT,
+            is_downloaded INTEGER,
+            created_at TEXT
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+    # Initialize DB connection and run auto-migration
+    db_url = f"sqlite:///{db_path}"
+    engine = init_db(db_url)
+
+    with get_db_session() as session:
+        repo = LEARepository(session)
+        p1 = repo.create_paper(sha256_hash="hash_p1", title="Paper 1")
+        p2 = repo.create_paper(sha256_hash="hash_p2", title="Paper 2")
+        r = repo.create_discovery_run(input_paper_id=p1.id)
+
+        cand = repo.add_candidate_paper(
+            run_id=r.id,
+            paper_id=p2.id,
+            score=0.8,
+            rrf_rank=1,
+            abstract_relevance_score=8.5,
+            abstract_relevance_tier="high",
+            abstract_relevance_reasoning="Highly relevant abstract."
+        )
+
+        assert cand.id is not None
+        assert cand.abstract_relevance_score == 8.5
+        assert cand.abstract_relevance_tier == "high"
+        assert cand.abstract_relevance_reasoning == "Highly relevant abstract."
+

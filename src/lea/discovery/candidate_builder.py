@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 from lea.discovery.openalex import OpenAlexClient
 from lea.discovery.semantic_scholar import SemanticScholarClient
 from lea.discovery.exclusion import ExclusionEngine
+from lea.discovery.abstract_screener import AbstractScreener
 from lea.resolution.matcher import is_same_paper
 from lea.resolution.metadata_merge import merge_paper_metadata
 from lea.logging import logger
@@ -13,11 +14,17 @@ class CandidateBuilder:
         self,
         openalex_client: Optional[OpenAlexClient] = None,
         semantic_scholar_client: Optional[SemanticScholarClient] = None,
-        config: Any = None
+        config: Any = None,
+        llm_backend: Optional[Any] = None,
+        embedder: Optional[Any] = None,
+        screener: Optional[AbstractScreener] = None
     ):
         self.openalex_client = openalex_client or OpenAlexClient()
         self.semantic_scholar_client = semantic_scholar_client or SemanticScholarClient()
         self.config = config
+        self.llm_backend = llm_backend
+        self.embedder = embedder
+        self.screener = screener or AbstractScreener(config=config, llm_backend=llm_backend, embedder=embedder)
 
     async def build_candidates(
         self,
@@ -25,7 +32,10 @@ class CandidateBuilder:
         cited_references: List[Dict[str, Any]],
         exclusion_status: str = "complete",
         final_candidate_limit: int = 20,
-        source_rrf_k: int = 60
+        source_rrf_k: int = 60,
+        screen_abstracts: Optional[bool] = None,
+        screening_method: Optional[str] = None,
+        min_relevance_score: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         title = input_paper_meta.get("title", "")
         oa_id = input_paper_meta.get("openalex_id")
@@ -148,11 +158,36 @@ class CandidateBuilder:
 
         filtered_candidates.sort(key=lambda x: x.get("rrf_score", 0.0), reverse=True)
 
+        # Check screening configuration and overrides
+        screen_config = getattr(getattr(self.config, "discovery", None), "screening", None)
+        if screen_abstracts is False:
+            do_screening = False
+        elif screen_abstracts is True:
+            do_screening = True
+        else:
+            do_screening = getattr(screen_config, "enabled", True) if screen_config else True
+
+        method = screening_method or (getattr(screen_config, "method", "llm") if screen_config else "llm")
+        pre_limit = getattr(screen_config, "pre_screening_limit", 50) if screen_config else 50
+        min_score = min_relevance_score if min_relevance_score is not None else (getattr(screen_config, "min_relevance_score", 6.0) if screen_config else 6.0)
+        max_candidates = getattr(screen_config, "max_screened_candidates", final_candidate_limit) if screen_config else final_candidate_limit
+
+        if do_screening:
+            logger.info(f"Executing abstract screening stage (method='{method}', min_score={min_score}, pre_limit={pre_limit})...")
+            pre_screen_pool = filtered_candidates[:pre_limit]
+            filtered_candidates = await self.screener.screen_candidates(
+                seed_paper_meta=input_paper_meta,
+                candidates=pre_screen_pool,
+                method=method,
+                min_score=min_score,
+                max_candidates=max_candidates
+            )
+
         # Assign final rrf_rank
         for i, cand in enumerate(filtered_candidates, start=1):
             cand["rrf_rank"] = i
 
-        return filtered_candidates[:final_candidate_limit]
+        return filtered_candidates[:max_candidates]
 
     def _compute_relevance(self, target_text: str, cand_text: str) -> float:
         stop_words = {
