@@ -270,6 +270,7 @@
                         {{ item.paper.authors | join(', ') }} ({{ item.paper.publication_year or 'N/A' }}) — <em>{{ item.paper.venue or 'Academic Venue' }}</em>
                     </div>
                 </div>
+            </div>
             {% if item.candidate.abstract_relevance_reasoning %}
             <div style="font-size: 0.85rem; color: #94a3b8; background: rgba(15, 23, 42, 0.5); border: 1px dashed rgba(139, 92, 246, 0.3); padding: 0.6rem 0.8rem; border-radius: 6px; margin: 0.75rem 0;">
                 <strong style="color: #c084fc;">Abstract Screening Justification:</strong> {{ item.candidate.abstract_relevance_reasoning }}
