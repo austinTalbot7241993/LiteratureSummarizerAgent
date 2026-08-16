@@ -11,6 +11,8 @@ def normalize_doi(doi: Optional[str]) -> Optional[str]:
     d = d.strip("/ ")
     return d if d else None
 
+ARXIV_ID_PATTERN = re.compile(r"\d{4}\.\d{4,5}(?:v\d+)?")
+
 def normalize_arxiv(arxiv_id: Optional[str]) -> Optional[str]:
     if not arxiv_id:
         return None
@@ -18,9 +20,20 @@ def normalize_arxiv(arxiv_id: Optional[str]) -> Optional[str]:
     for prefix in ["https://arxiv.org/abs/", "http://arxiv.org/abs/", "arxiv:"]:
         if a.startswith(prefix):
             a = a[len(prefix):]
-    # Strip version suffix if present e.g. 2301.12345v2 -> 2301.12345
-    a = re.sub(r"v\d+$", "", a)
-    return a if a else None
+    # Extract just the valid arXiv-ID-shaped substring (YYMM.NNNNN[vN]) via
+    # search rather than trusting the whole remaining string is clean and
+    # merely stripping a trailing "vN". A raw GROBID/PDF-text extraction can
+    # glue adjacent watermark text onto the ID with no separator (observed:
+    # "2608.12838v1[math.st]" from an arXiv sidebar watermark rendered
+    # across a line break), which the old trailing-anchor regex (`v\d+$`)
+    # would silently fail to strip since the string no longer ends in just
+    # "vN". Searching for the ID pattern and discarding everything else
+    # (including any version suffix, matching prior behavior) is robust to
+    # whatever garbage is attached before or after it.
+    match = ARXIV_ID_PATTERN.search(a)
+    if not match:
+        return None
+    return re.sub(r"v\d+$", "", match.group(0))
 
 def normalize_openalex_id(openalex_id: Optional[str]) -> Optional[str]:
     if not openalex_id:
