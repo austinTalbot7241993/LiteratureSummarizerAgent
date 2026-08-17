@@ -249,6 +249,15 @@
                         {% if item.paper.is_open_access %}
                         <span class="badge badge-success">Open Access PDF</span>
                         {% endif %}
+                        {% if item.summary and item.summary.self_critique_verdict %}
+                          {% if item.summary.self_critique_verdict == 'accepted' %}
+                          <span class="badge badge-success">✓ Verified & Accepted</span>
+                          {% elif item.summary.self_critique_verdict == 'marginal' %}
+                          <span class="badge badge-warning">⚠️ Marginally Grounded</span>
+                          {% else %}
+                          <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border-color: rgba(239, 68, 68, 0.4);">✗ Pruned / Rejected</span>
+                          {% endif %}
+                        {% endif %}
                         {% if item.summary and item.summary.data_availability %}
                           {% if item.summary.data_availability == 'publicly_available' %}
                           <span class="badge badge-public">🌐 Publicly Available Data</span>

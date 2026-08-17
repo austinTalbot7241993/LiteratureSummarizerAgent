@@ -1,5 +1,7 @@
-import asyncio
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+import asyncio
 import sys
 import uuid
 from typing import Optional
@@ -20,6 +22,29 @@ app = typer.Typer(
 console = Console()
 db_app = typer.Typer(help="Database administration subcommands")
 app.add_typer(db_app, name="db")
+
+
+def _build_llm_backend(config, allow_mock: bool = False):
+    """Builds the LLM backend used for abstract screening and summarization.
+
+    Falls back to MockLLMBackend when --mock is passed or no CUDA GPU is
+    available, matching the behavior already used for summarization in the
+    `run` command.
+    """
+    from lea.llm.backends import MockLLMBackend, TransformersPeftBackend
+
+    if allow_mock:
+        return MockLLMBackend()
+
+    import torch
+    if torch.cuda.is_available() and config.llm.device == "cuda":
+        return TransformersPeftBackend(
+            model_name=config.llm.model,
+            adapter_path=config.llm.adapter_path,
+            max_context_tokens=config.llm.max_context_tokens
+        )
+
+    return MockLLMBackend()
 
 
 @app.command()
@@ -111,9 +136,10 @@ def ingest(pdf_path: str = typer.Argument(..., help="Path to input paper PDF")):
         authors = fallback_meta["authors"]
         doi = fallback_meta["doi"]
         arxiv_id = fallback_meta["arxiv_id"]
+        abstract = fallback_meta.get("abstract")
 
         # Attempt GROBID fulltext parse
-        grobid_client = GrobidClient(base_url=config.services.grobid_url)
+        grobid_client = GrobidClient(base_url=config.services.grobid_url, timeout=config.services.grobid_timeout_seconds)
         if asyncio.run(grobid_client.is_alive()):
             try:
                 tei_xml = asyncio.run(grobid_client.process_fulltext(pdf_path))
@@ -126,9 +152,18 @@ def ingest(pdf_path: str = typer.Argument(..., help="Path to input paper PDF")):
                     doi = tei_header["doi"]
                 if tei_header.get("arxiv_id"):
                     arxiv_id = tei_header["arxiv_id"]
+                if tei_header.get("abstract"):
+                    abstract = tei_header["abstract"]
             except Exception as exc:
                 logger.warning(f"GROBID header extraction fallback: {exc}")
 
+        # NOTE: `abstract` was previously computed by parse_fallback_metadata()
+        # (and potentially improved by GROBID above) but never actually passed
+        # into create_paper() -- the input paper's abstract was silently
+        # discarded on every ingestion, regardless of whether GROBID succeeded.
+        # This starved downstream abstract screening and the target_abstract
+        # passed into summarization/critique prompts of any real content for
+        # the seed paper.
         paper = repo.create_paper(
             sha256_hash=sha256,
             title=title,
@@ -136,12 +171,13 @@ def ingest(pdf_path: str = typer.Argument(..., help="Path to input paper PDF")):
             doi=normalize_doi(doi),
             arxiv_id=normalize_arxiv(arxiv_id),
             publication_year=fallback_meta.get("publication_year"),
+            abstract=abstract,
             pdf_path=pdf_path
         )
 
         # Extract bibliography references
         oa_client = OpenAlexClient()
-        ref_parser = ReferenceParser(grobid_url=config.services.grobid_url)
+        ref_parser = ReferenceParser(grobid_url=config.services.grobid_url, grobid_timeout=config.services.grobid_timeout_seconds)
         references, status = asyncio.run(ref_parser.extract_references(
             pdf_path=pdf_path,
             doi=doi,
@@ -161,7 +197,8 @@ def discover(
     paper_id: str = typer.Argument(..., help="Paper UUID to discover related literature for"),
     screen_abstracts: bool = typer.Option(True, "--screen-abstracts/--no-screen-abstracts", help="Enable or disable abstract-based relevance screening"),
     screening_method: Optional[str] = typer.Option(None, "--screening-method", "--method", help="Abstract screening method ('llm' or 'embedding')"),
-    min_relevance: Optional[float] = typer.Option(None, "--min-relevance", "--min-score", help="Minimum abstract relevance score (0.0 - 10.0)")
+    min_relevance: Optional[float] = typer.Option(None, "--min-relevance", "--min-score", help="Minimum abstract relevance score (0.0 - 10.0)"),
+    allow_mock: bool = typer.Option(False, "--mock", help="Allow mock LLM backend fallback for testing without GPU")
 ):
     """Discovers related literature excluding input paper and works in bibliography."""
     config = load_config()
@@ -206,7 +243,20 @@ def discover(
         run = repo.create_discovery_run(input_paper_id=paper.id, exclusion_status=exclusion_status)
 
         from lea.discovery.candidate_builder import CandidateBuilder
-        builder = CandidateBuilder(config=config)
+
+        # Only load an LLM backend when LLM-based screening can actually run; this
+        # avoids an unnecessary model load if screening is disabled or configured
+        # to use the embedding method. Without this, screening.method="llm" was
+        # silently falling back to embedding-only scoring on every run because no
+        # backend was ever constructed here.
+        resolved_method = screening_method or (
+            getattr(config.discovery.screening, "method", "llm") if config.discovery.screening else "llm"
+        )
+        llm_backend = None
+        if screen_abstracts and resolved_method == "llm":
+            llm_backend = _build_llm_backend(config, allow_mock=allow_mock)
+
+        builder = CandidateBuilder(config=config, llm_backend=llm_backend)
 
         candidates = asyncio.run(builder.build_candidates(
             input_paper_meta=paper_meta,
@@ -219,23 +269,40 @@ def discover(
             min_relevance_score=min_relevance
         ))
 
+        stored_count = 0
         for cand_dict in candidates:
-            # Upsert candidate paper into DB
-            c_sha = str(uuid.uuid4())[:32]
-            c_paper = repo.create_paper(
-                sha256_hash=c_sha,
-                title=cand_dict.get("title", "Untitled"),
-                authors=cand_dict.get("authors", []),
+            # Resolve to an existing paper by stable external identifiers
+            # first, mirroring the same fix in llm/quota_manager.py -- without
+            # this, two entries in `candidates` that refer to the same
+            # real-world paper (e.g. a merge/dedup miss upstream in
+            # CandidateBuilder) each got a brand new Paper row with a random
+            # UUID sha256_hash, silently doubling up candidates in the report.
+            c_paper = repo.find_paper_by_external_ids(
                 doi=cand_dict.get("doi"),
                 arxiv_id=cand_dict.get("arxiv_id"),
                 openalex_id=cand_dict.get("openalex_id"),
-                s2_id=cand_dict.get("s2_id"),
-                publication_year=cand_dict.get("publication_year"),
-                venue=cand_dict.get("venue"),
-                abstract=cand_dict.get("abstract"),
-                is_open_access=cand_dict.get("is_open_access", False),
-                oa_pdf_url=cand_dict.get("oa_pdf_url")
+                s2_id=cand_dict.get("s2_id")
             )
+            if c_paper and repo.get_candidate_for_run_and_paper(run.id, c_paper.id):
+                logger.info(f"Skipping duplicate discovered candidate '{cand_dict.get('title')}' -- already registered for this run.")
+                continue
+
+            if not c_paper:
+                c_sha = str(uuid.uuid4())[:32]
+                c_paper = repo.create_paper(
+                    sha256_hash=c_sha,
+                    title=cand_dict.get("title", "Untitled"),
+                    authors=cand_dict.get("authors", []),
+                    doi=cand_dict.get("doi"),
+                    arxiv_id=cand_dict.get("arxiv_id"),
+                    openalex_id=cand_dict.get("openalex_id"),
+                    s2_id=cand_dict.get("s2_id"),
+                    publication_year=cand_dict.get("publication_year"),
+                    venue=cand_dict.get("venue"),
+                    abstract=cand_dict.get("abstract"),
+                    is_open_access=cand_dict.get("is_open_access", False),
+                    oa_pdf_url=cand_dict.get("oa_pdf_url")
+                )
 
             repo.add_candidate_paper(
                 run_id=run.id,
@@ -248,10 +315,11 @@ def discover(
                 abstract_relevance_tier=cand_dict.get("abstract_relevance_tier"),
                 abstract_relevance_reasoning=cand_dict.get("abstract_relevance_reasoning")
             )
+            stored_count += 1
 
         repo.update_discovery_run(run.id, run_status="discovered")
         console.print(f"[bold green]Discovery run completed (RUN ID: {run.id})[/bold green]")
-        console.print(f"Discovered and stored [cyan]{len(candidates)}[/cyan] candidate papers after strict citation exclusion.")
+        console.print(f"Discovered and stored [cyan]{stored_count}[/cyan] candidate papers after strict citation exclusion.")
 
 
 @app.command()
@@ -483,6 +551,7 @@ def summarize(
                 availability_chunks=availability_chunks,
                 target_paper_meta=input_paper_meta
             )
+            critique = getattr(tech_summary, "critique", None)
             repo.add_summary(
                 run_id=r_uuid,
                 candidate_paper_id=cand.id,
@@ -494,7 +563,12 @@ def summarize(
                 data_availability=assessment.overall_status.value if hasattr(assessment.overall_status, "value") else str(assessment.overall_status),
                 data_location=tech_summary.data_location,
                 data_availability_assessment=assessment.model_dump(mode="json"),
-                model_name=config.llm.model
+                model_name=config.llm.model,
+                self_critique_verdict=critique.verdict if critique else None,
+                self_critique_relevance_score=critique.relevance_score if critique else None,
+                self_critique_grounding_score=critique.factual_grounding_score if critique else None,
+                self_critique_rationale=critique.critique_rationale if critique else None,
+                is_accepted=(critique.verdict in ["accepted", "marginal"]) if critique else True
             )
 
         repo.update_discovery_run(r_uuid, run_status="summarized")
@@ -533,7 +607,9 @@ def run(
     allow_mock: bool = typer.Option(False, "--mock", help="Allow mock LLM backend fallback for testing without GPU"),
     screen_abstracts: bool = typer.Option(True, "--screen-abstracts/--no-screen-abstracts", help="Enable or disable abstract-based relevance screening"),
     screening_method: Optional[str] = typer.Option(None, "--screening-method", help="Abstract screening method ('llm' or 'embedding')"),
-    min_relevance: Optional[float] = typer.Option(None, "--min-relevance", help="Minimum abstract relevance score (0.0 - 10.0)")
+    min_relevance: Optional[float] = typer.Option(None, "--min-relevance", help="Minimum abstract relevance score (0.0 - 10.0)"),
+    target_sources: Optional[int] = typer.Option(None, "--target-sources", help="Target valid source quota to collect in final report"),
+    min_grounding: Optional[float] = typer.Option(None, "--min-grounding", help="Minimum factual grounding score threshold")
 ):
     """Executes full end-to-end literature exploration pipeline."""
     console.print(f"[bold blue]Starting end-to-end LEA pipeline for paper {pdf_path}...[/bold blue]")
@@ -560,8 +636,9 @@ def run(
             authors = fallback_meta["authors"]
             doi = fallback_meta["doi"]
             arxiv_id = fallback_meta["arxiv_id"]
+            abstract = fallback_meta.get("abstract")
 
-            grobid_client = GrobidClient(base_url=config.services.grobid_url)
+            grobid_client = GrobidClient(base_url=config.services.grobid_url, timeout=config.services.grobid_timeout_seconds)
             if asyncio.run(grobid_client.is_alive()):
                 try:
                     tei_xml = asyncio.run(grobid_client.process_fulltext(pdf_path))
@@ -574,9 +651,14 @@ def run(
                         doi = tei_header["doi"]
                     if tei_header.get("arxiv_id"):
                         arxiv_id = tei_header["arxiv_id"]
+                    if tei_header.get("abstract"):
+                        abstract = tei_header["abstract"]
                 except Exception as exc:
                     logger.warning(f"GROBID error: {exc}")
 
+            # See the identical note in ingest(): the abstract was computed
+            # but never passed into create_paper(), so the seed paper's
+            # abstract was silently discarded on every real `lea run`.
             paper = repo.create_paper(
                 sha256_hash=sha256,
                 title=title,
@@ -584,11 +666,12 @@ def run(
                 doi=normalize_doi(doi),
                 arxiv_id=normalize_arxiv(arxiv_id),
                 publication_year=fallback_meta.get("publication_year"),
+                abstract=abstract,
                 pdf_path=pdf_path
             )
 
             oa_client = OpenAlexClient()
-            ref_parser = ReferenceParser(grobid_url=config.services.grobid_url)
+            ref_parser = ReferenceParser(grobid_url=config.services.grobid_url, grobid_timeout=config.services.grobid_timeout_seconds)
             references, status = asyncio.run(ref_parser.extract_references(
                 pdf_path=pdf_path,
                 doi=doi,
@@ -600,12 +683,13 @@ def run(
 
         paper_id = paper.id
 
-    # Pipeline stages
+    # Pipeline Stage 1: Candidate Discovery & Abstract Pre-Screening
     discover(
         str(paper_id),
         screen_abstracts=screen_abstracts,
         screening_method=screening_method,
-        min_relevance=min_relevance
+        min_relevance=min_relevance,
+        allow_mock=allow_mock
     )
 
     # Retrieve created run_id
@@ -614,9 +698,116 @@ def run(
         runs = repo.get_paper_by_id(paper_id).discovery_runs
         run_id = str(runs[-1].id)
 
-    acquire(run_id)
-    index(run_id)
-    summarize(run_id, allow_mock=allow_mock)
+    # Pipeline Stage 2: Iterative Source Quota Loop (Acquire, Index, Summarize, Self-Critique, Graph Expand)
+    target_quota = target_sources if target_sources is not None else getattr(config.llm.critique, "target_valid_sources", 20)
+    min_rel = min_relevance if min_relevance is not None else getattr(config.llm.critique, "min_relevance_score", 6.0)
+    min_gnd = min_grounding if min_grounding is not None else getattr(config.llm.critique, "min_grounding_score", 7.0)
+
+    from lea.acquisition.downloader import PDFDownloader
+    from lea.rag.chunker import HierarchicalChunker
+    from lea.rag.embedder import BGEEmbedder
+    from lea.rag.dense_search import DenseSearchEngine
+    from lea.rag.hybrid_search import HybridSearchEngine
+    from lea.llm.inference import TechnicalSummarizer
+    from lea.llm.backends import MockLLMBackend, TransformersPeftBackend
+    from lea.llm.quota_manager import IterativeSourceManager
+
+    downloader = PDFDownloader(
+        cache_dir=config.application.cache_dir + "/pdfs",
+        max_pdf_bytes=config.acquisition.max_pdf_bytes,
+        user_agent=config.acquisition.user_agent,
+        unpaywall_email=config.services.unpaywall_email or None
+    )
+    chunker = HierarchicalChunker(
+        tokenizer_model=config.chunking.tokenizer_model,
+        parent_tokens=config.chunking.parent_tokens,
+        parent_overlap_tokens=config.chunking.parent_overlap_tokens,
+        child_tokens=config.chunking.child_tokens,
+        child_overlap_tokens=config.chunking.child_overlap_tokens
+    )
+    embedder = BGEEmbedder(
+        model_name=config.embedding.model,
+        max_length=config.embedding.max_length,
+        use_subprocess=True if config.embedding.device == "cuda" else False
+    )
+    dense_engine = DenseSearchEngine(embedder)
+    hybrid_engine = HybridSearchEngine(dense_engine, rrf_k=config.retrieval.rrf_k)
+
+    import torch
+    if allow_mock:
+        backend = MockLLMBackend()
+    elif torch.cuda.is_available() and config.llm.device == "cuda":
+        backend = TransformersPeftBackend(
+            model_name=config.llm.model,
+            adapter_path=config.llm.adapter_path,
+            max_context_tokens=config.llm.max_context_tokens
+        )
+    else:
+        backend = MockLLMBackend()
+
+    summarizer = TechnicalSummarizer(backend=backend, max_attempts=config.llm.generation_attempts)
+
+    quota_manager = IterativeSourceManager(
+        config=config,
+        target_sources=target_quota,
+        min_relevance_score=min_rel,
+        min_grounding_score=min_gnd,
+        max_search_depth=getattr(config.llm.critique, "max_search_depth_candidates", 100),
+        enable_secondary_graph_expansion=getattr(config.llm.critique, "enable_secondary_graph_expansion", True),
+        summarizer=summarizer,
+        downloader=downloader,
+        chunker=chunker,
+        embedder=embedder,
+        hybrid_engine=hybrid_engine
+    )
+
+    with get_db_session() as session:
+        repo = LEARepository(session)
+        run_obj = repo.get_discovery_run(uuid.UUID(run_id))
+        cands = repo.get_candidates_for_run(uuid.UUID(run_id))
+        cand_dicts = [
+            {
+                "title": c.paper.title,
+                "authors": c.paper.authors,
+                "doi": c.paper.doi,
+                "arxiv_id": c.paper.arxiv_id,
+                "openalex_id": c.paper.openalex_id,
+                "s2_id": c.paper.s2_id,
+                "publication_year": c.paper.publication_year,
+                "venue": c.paper.venue,
+                "abstract": c.paper.abstract,
+                "is_open_access": c.paper.is_open_access,
+                "oa_pdf_url": c.paper.oa_pdf_url or c.open_access_url,
+                "abstract_relevance_score": c.abstract_relevance_score,
+                "abstract_relevance_tier": c.abstract_relevance_tier,
+                "abstract_relevance_reasoning": c.abstract_relevance_reasoning
+            }
+            for c in cands
+        ]
+        ref_objs = repo.get_references_for_paper(run_obj.input_paper_id)
+        ref_dicts = [
+            {
+                "title": r.title,
+                "authors": r.authors or [],
+                "doi": r.doi,
+                "arxiv_id": r.arxiv_id,
+                "openalex_id": r.openalex_id,
+                "s2_id": r.s2_id,
+                "year": r.year
+            }
+            for r in ref_objs
+        ]
+        input_meta = {
+            "title": run_obj.input_paper.title,
+            "doi": run_obj.input_paper.doi,
+            "arxiv_id": run_obj.input_paper.arxiv_id,
+            "openalex_id": run_obj.input_paper.openalex_id,
+            "s2_id": run_obj.input_paper.s2_id,
+            "abstract": run_obj.input_paper.abstract
+        }
+
+        asyncio.run(quota_manager.execute_quota_loop(repo, uuid.UUID(run_id), cand_dicts, input_meta, ref_dicts))
+
     report(run_id, output=output)
 
     console.print(f"[bold green]End-to-end pipeline completed successfully! Output: {output}[/bold green]")

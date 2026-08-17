@@ -6,6 +6,27 @@ from lea.llm.schemas import TechnicalSummary
 from lea.rag.prompts import SUMMARY_USER_PROMPT_TEMPLATE
 from lea.exceptions import SummaryValidationError
 
+class AlwaysFailingCritiqueBackend(BaseLLMBackend):
+    def generate_summary(self, system_prompt: str, user_prompt: str) -> TechnicalSummary:
+        return TechnicalSummary(
+            problem_formulation="Valid problem statement.",
+            methodological_novelty="Valid methodological novelty.",
+            empirical_findings="Valid empirical findings.",
+            paragraph_summary="Valid single paragraph summary.",
+            data_availability="publicly_available"
+        )
+
+    def generate_data_availability(self, system_prompt: str, user_prompt: str):
+        from lea.llm.schemas import DataAvailabilityAssessment, PaperAvailabilityStatus
+        return DataAvailabilityAssessment(
+            overall_status=PaperAvailabilityStatus.NOT_REPORTED,
+            datasets=[],
+            rationale="Not reported"
+        )
+
+    def generate_critique(self, system_prompt: str, user_prompt: str):
+        raise SummaryValidationError("Simulated permanent critique failure (e.g. malformed JSON)")
+
 class FailingFirstAttemptBackend(BaseLLMBackend):
     def __init__(self):
         self.call_history = []
@@ -36,6 +57,7 @@ def test_user_prompt_template_places_directives_before_context():
         authors="Test Author",
         year="2024",
         target_title="Target Input Paper",
+        target_abstract="Sample target abstract",
         context_text="Sample context"
     )
     format_idx = formatted.index("REQUIRED FORMAT:")
@@ -105,4 +127,34 @@ def test_extract_data_availability_fallback_on_failure():
     from lea.llm.schemas import PaperAvailabilityStatus
     assert assessment.overall_status == PaperAvailabilityStatus.NOT_REPORTED
     assert "Defaulted to not_reported" in assessment.rationale
+
+
+def test_critique_candidate_fails_safe_not_open_on_repeated_failure():
+    """Regression test: when the self-critique LLM call fails on every retry
+    attempt, critique_candidate() must default to REJECTING the candidate, not
+    fabricating a passing score. The old fallback returned
+    (is_relevant_to_seed_topic=True, verdict="marginal", 6.0/6.0), which meant a
+    candidate with zero real relevance judgment could still pass
+    IterativeSourceManager's acceptance threshold in quota_manager.py --
+    exactly what let an irrelevant paper (about fusion-reactor camera
+    shielding) get accepted into a real run against a genomics paper, purely
+    because its critique call happened to fail to parse.
+    """
+    backend = AlwaysFailingCritiqueBackend()
+    summarizer = TechnicalSummarizer(backend=backend, max_attempts=2)
+
+    candidate_meta = {"title": "Unrelated Candidate Paper", "authors": ["Someone"], "year": 2024}
+    summary, _ = summarizer.summarize_candidate(candidate_meta, [{"content": "sample text"}])
+
+    critique = summarizer.critique_candidate(
+        candidate_meta,
+        summary,
+        [{"content": "sample text"}],
+        target_paper_meta={"title": "Seed Paper", "abstract": "Seed paper abstract."}
+    )
+
+    assert critique.is_relevant_to_seed_topic is False
+    assert critique.verdict == "rejected"
+    assert critique.relevance_score == 0.0
+    assert critique.factual_grounding_score == 0.0
 

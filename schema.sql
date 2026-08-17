@@ -107,7 +107,18 @@ CREATE TABLE IF NOT EXISTS technical_summaries (
     data_location TEXT,
     data_availability_assessment JSONB,
     model_name VARCHAR(255) NOT NULL,
+    self_critique_verdict VARCHAR(20) DEFAULT NULL,
+    self_critique_relevance_score FLOAT DEFAULT NULL,
+    self_critique_grounding_score FLOAT DEFAULT NULL,
+    self_critique_rationale TEXT DEFAULT NULL,
+    is_accepted BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE technical_summaries ADD COLUMN IF NOT EXISTS self_critique_verdict VARCHAR(20) DEFAULT NULL;
+ALTER TABLE technical_summaries ADD COLUMN IF NOT EXISTS self_critique_relevance_score FLOAT DEFAULT NULL;
+ALTER TABLE technical_summaries ADD COLUMN IF NOT EXISTS self_critique_grounding_score FLOAT DEFAULT NULL;
+ALTER TABLE technical_summaries ADD COLUMN IF NOT EXISTS self_critique_rationale TEXT DEFAULT NULL;
+ALTER TABLE technical_summaries ADD COLUMN IF NOT EXISTS is_accepted BOOLEAN DEFAULT TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_summaries_run_id ON technical_summaries (run_id);

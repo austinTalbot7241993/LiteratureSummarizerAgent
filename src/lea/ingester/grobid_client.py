@@ -5,7 +5,7 @@ from lea.exceptions import IngestError
 from lea.logging import logger
 
 class GrobidClient:
-    def __init__(self, base_url: str = "http://localhost:8070", timeout: float = 30.0):
+    def __init__(self, base_url: str = "http://localhost:8070", timeout: float = 120.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
@@ -29,7 +29,19 @@ class GrobidClient:
                     files = {"input": (path.name, f, "application/pdf")}
                     data = {
                         "generateIDs": "1",
-                        "consolidateHeader": "1",
+                        # Header consolidation cross-checks the extracted title/
+                        # author against CrossRef and fills in a "matched" DOI.
+                        # For anonymized/preprint submissions with no real author
+                        # name for CrossRef to match against, this can (and, on
+                        # a real anonymized preprint, did) confidently return a
+                        # completely unrelated paper's DOI -- which then corrupts
+                        # the input paper's identity for the entire downstream
+                        # discovery pipeline (it starts searching that OTHER
+                        # paper's citation neighborhood instead). Reference-level
+                        # consolidation is left on: a wrong match on one citation
+                        # among many is low-impact, unlike corrupting the seed
+                        # paper's own identity.
+                        "consolidateHeader": "0",
                         "consolidateCitations": "1"
                     }
                     res = await client.post(url, files=files, data=data)

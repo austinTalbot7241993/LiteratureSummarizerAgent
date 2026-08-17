@@ -28,6 +28,7 @@ def test_real_pdf_extraction_and_prompt_formatting():
         authors="Genome Research Group",
         year=2024,
         target_title="Target Input Paper",
+        target_abstract="A sample target paper abstract for prompt formatting tests.",
         context_text=context_text
     )
 
@@ -51,6 +52,7 @@ def test_real_gpu_llm_inference():
         authors="Genome Research Group",
         year=2024,
         target_title="Target Input Paper",
+        target_abstract="A sample target paper abstract for prompt formatting tests.",
         context_text=context_text
     )
 

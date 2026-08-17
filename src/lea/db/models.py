@@ -130,6 +130,11 @@ class TechnicalSummaryModel(Base):
     data_location = Column(Text, nullable=True)
     data_availability_assessment = Column(JSONType, nullable=True)
     model_name = Column(String(255), nullable=False)
+    self_critique_verdict = Column(String(20), nullable=True)
+    self_critique_relevance_score = Column(Float, nullable=True)
+    self_critique_grounding_score = Column(Float, nullable=True)
+    self_critique_rationale = Column(Text, nullable=True)
+    is_accepted = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     run = relationship("DiscoveryRun", back_populates="summaries")

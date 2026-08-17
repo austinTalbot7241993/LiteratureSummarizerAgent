@@ -8,6 +8,7 @@ application:
 services:
   database_url: ${LEA_DATABASE_URL:-postgresql://lea_user:lea_pass@localhost:5433/lea_db}
   grobid_url: ${LEA_GROBID_URL:-http://localhost:8070}
+  grobid_timeout_seconds: 120.0     # GROBID full-document + consolidation can legitimately take >30s
   openalex_api_key: ${OPENALEX_API_KEY}
   semantic_scholar_api_key: ${SEMANTIC_SCHOLAR_API_KEY:-}
   unpaywall_email: ${UNPAYWALL_EMAIL:-}
@@ -35,7 +36,7 @@ discovery:
     method: "llm"                    # Options: "llm", "embedding"
     pre_screening_limit: 50           # Fetch top 50 candidates from APIs for screening
     min_relevance_score: 6.0          # Minimum relevance score (0-10) to pass filter
-    max_screened_candidates: 10       # Final candidate budget passed to acquire step
+    max_screened_candidates: null     # Final candidate budget; defaults to discovery.final_candidate_limit when unset
     fallback_on_missing_abstract: pass # Options: "pass" (keep candidate), "drop"
 
 acquisition:
@@ -85,6 +86,15 @@ llm:
   temperature: 0.1
   top_p: 0.9
   generation_attempts: 2
+
+  # Self-Critique & Iterative Source Quota Settings
+  critique:
+    enabled: true
+    target_valid_sources: 20            # Loop until exactly 20 valid sources are accepted
+    min_relevance_score: 6.0            # Minimum score required for acceptance
+    min_grounding_score: 7.0            # Minimum factual grounding score required
+    max_search_depth_candidates: 100    # Hard limit on total candidate evaluations
+    enable_secondary_graph_expansion: true # Expand to 2nd-degree citations if queue empties
 
 report:
   title: Literature Exploration Report

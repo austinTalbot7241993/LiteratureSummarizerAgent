@@ -72,6 +72,34 @@ class DatasetAvailability(BaseModel):
     required_for_reproduction: Optional[bool] = None
     evidence: List[AvailabilityEvidence] = Field(default_factory=list)
 
+    @field_validator("ownership", mode="before")
+    @classmethod
+    def validate_ownership(cls, v: Any) -> DatasetOwnership:
+        if v is None:
+            return DatasetOwnership.UNKNOWN
+        if isinstance(v, DatasetOwnership):
+            return v
+        if isinstance(v, str):
+            val = v.strip().lower()
+            for item in DatasetOwnership:
+                if item.value == val:
+                    return item
+        return DatasetOwnership.UNKNOWN
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, v: Any) -> DatasetRole:
+        if v is None:
+            return DatasetRole.UNKNOWN
+        if isinstance(v, DatasetRole):
+            return v
+        if isinstance(v, str):
+            val = v.strip().lower()
+            for item in DatasetRole:
+                if item.value == val:
+                    return item
+        return DatasetRole.UNKNOWN
+
     @model_validator(mode="after")
     def validate_dataset_rules(self) -> "DatasetAvailability":
         # 1. Non-not_reported datasets should ordinarily contain evidence
@@ -146,6 +174,26 @@ class DataAvailabilityAssessment(BaseModel):
         return self
 
 
+class SelfCritiqueAssessment(BaseModel):
+    is_relevant_to_seed_topic: bool = Field(
+        description="True if retrieved text chunks directly address the seed paper's core problem formulation."
+    )
+    relevance_score: float = Field(
+        ge=0.0, le=10.0,
+        description="Score from 0.0 to 10.0 measuring relevance of candidate paper content to seed topic."
+    )
+    factual_grounding_score: float = Field(
+        ge=0.0, le=10.0,
+        description="Score from 0.0 to 10.0 measuring how strictly summary claims are supported by verbatim text chunks."
+    )
+    critique_rationale: str = Field(
+        description="1-2 sentence justification for the relevance and grounding assessment."
+    )
+    verdict: Literal["accepted", "marginal", "rejected"] = Field(
+        description="Decision: 'accepted' (score >= 6.5), 'marginal' (5.0-6.4), 'rejected' (< 5.0 or off-topic)."
+    )
+
+
 class TechnicalSummary(BaseModel):
     problem_formulation: str = Field(
         min_length=1,
@@ -174,6 +222,10 @@ class TechnicalSummary(BaseModel):
     data_location: Optional[str] = Field(
         default=None,
         description="Dataset location, URL, accession number, repository name, or access conditions",
+    )
+    critique: Optional[SelfCritiqueAssessment] = Field(
+        default=None,
+        description="Self-critique assessment evaluating topic relevance and factual grounding"
     )
 
     @field_validator("data_availability", mode="before")

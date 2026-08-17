@@ -34,6 +34,14 @@ class ApplicationConfig(BaseModel):
 class ServicesConfig(BaseModel):
     database_url: str = Field(default_factory=lambda: os.getenv("LEA_DATABASE_URL", "postgresql://lea_user:lea_pass@localhost:5433/lea_db"))
     grobid_url: str = Field(default_factory=lambda: os.getenv("LEA_GROBID_URL", "http://localhost:8070"))
+    # GROBID's processFulltextDocument with consolidateHeader/consolidateCitations
+    # enabled performs external cross-reference lookups per citation and can
+    # legitimately take well over 30s on a real paper with many references.
+    # The previous hardcoded 30s default caused silent timeouts that fell back
+    # to much lower-quality naive metadata extraction (no DOI/abstract/full
+    # title resolution), which then starved literature discovery of anything
+    # to search against.
+    grobid_timeout_seconds: float = 120.0
     openalex_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("OPENALEX_API_KEY"))
     semantic_scholar_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("SEMANTIC_SCHOLAR_API_KEY"))
     unpaywall_email: Optional[str] = Field(default_factory=lambda: os.getenv("UNPAYWALL_EMAIL"))
@@ -51,7 +59,7 @@ class ScreeningConfig(BaseModel):
     method: str = "llm"
     pre_screening_limit: int = 50
     min_relevance_score: float = 6.0
-    max_screened_candidates: int = 10
+    max_screened_candidates: Optional[int] = None
     fallback_on_missing_abstract: str = "pass"
 
 class DiscoveryConfig(BaseModel):
@@ -94,6 +102,14 @@ class RetrievalConfig(BaseModel):
     sparse_backend: str = "bm25s"
     scope_sparse_index_per_run: bool = True
 
+class CritiqueConfig(BaseModel):
+    enabled: bool = True
+    target_valid_sources: int = 20
+    min_relevance_score: float = 6.0
+    min_grounding_score: float = 7.0
+    max_search_depth_candidates: int = 100
+    enable_secondary_graph_expansion: bool = True
+
 class LLMConfig(BaseModel):
     model: str = "Qwen/Qwen2.5-7B-Instruct"
     adapter_path: Optional[str] = None
@@ -109,6 +125,7 @@ class LLMConfig(BaseModel):
     temperature: float = 0.1
     top_p: float = 0.9
     generation_attempts: int = 2
+    critique: CritiqueConfig = CritiqueConfig()
 
 class ReportConfig(BaseModel):
     title: str = "Literature Exploration Report"

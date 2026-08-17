@@ -35,7 +35,20 @@ class HTMLReportExporter:
             paper = cand.paper
             summary = cand.summary
 
-            if not cand.is_downloaded and not include_abstract_only:
+            # A candidate with a real, accepted summary is a genuine pipeline
+            # result and must be shown regardless of whether a full-text PDF
+            # was ever downloaded -- summarization deliberately falls back to
+            # title/abstract-only context when no PDF is available (most
+            # candidates are not open access), and self-critique can still
+            # legitimately accept a paper on that basis. Requiring
+            # is_downloaded here meant a fully successful run whose accepted
+            # papers all happened to lack an open-access PDF rendered an empty
+            # "0 Papers" report even though real, accepted summaries existed.
+            # Only candidates with NO summary at all (never reached the quota
+            # loop's deep-evaluation stage, e.g. screened by `discover` but
+            # not reached before the quota loop hit its target/depth cap) are
+            # gated behind include_abstract_only.
+            if not cand.summary and not include_abstract_only:
                 continue
 
             paper_dict = {
@@ -55,6 +68,9 @@ class HTMLReportExporter:
 
             summary_dict = None
             if summary:
+                if getattr(summary, "is_accepted", True) is False and not include_abstract_only:
+                    continue
+
                 summary_dict = {
                     "problem_formulation": summary.problem_formulation,
                     "methodological_novelty": summary.methodological_novelty,
@@ -63,7 +79,12 @@ class HTMLReportExporter:
                     "relationship_to_target": getattr(summary, "relationship_to_target", None),
                     "data_availability": getattr(summary, "data_availability", "unclear"),
                     "data_location": getattr(summary, "data_location", None),
-                    "data_availability_assessment": getattr(summary, "data_availability_assessment", None)
+                    "data_availability_assessment": getattr(summary, "data_availability_assessment", None),
+                    "self_critique_verdict": getattr(summary, "self_critique_verdict", None),
+                    "self_critique_relevance_score": getattr(summary, "self_critique_relevance_score", None),
+                    "self_critique_grounding_score": getattr(summary, "self_critique_grounding_score", None),
+                    "self_critique_rationale": getattr(summary, "self_critique_rationale", None),
+                    "is_accepted": getattr(summary, "is_accepted", True)
                 }
 
             items.append({

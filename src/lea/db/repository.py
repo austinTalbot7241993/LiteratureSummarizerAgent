@@ -20,6 +20,41 @@ class LEARepository:
     def get_paper_by_doi(self, doi: str) -> Optional[Paper]:
         return self.session.query(Paper).filter(Paper.doi == doi).first()
 
+    def find_paper_by_external_ids(
+        self,
+        doi: Optional[str] = None,
+        arxiv_id: Optional[str] = None,
+        openalex_id: Optional[str] = None,
+        s2_id: Optional[str] = None
+    ) -> Optional[Paper]:
+        """Looks up a paper by any stable external identifier.
+
+        Candidates discovered from OpenAlex/Semantic Scholar never carry a
+        sha256_hash (that field is only ever set for the originally-ingested
+        PDF), so relying on get_paper_by_hash alone can never recognize a
+        paper that was already seen -- every rediscovery (e.g. via repeated
+        secondary graph expansion) looks "new". Check DOI, arXiv ID, OpenAlex
+        ID, and Semantic Scholar ID instead, since at least one is normally
+        present and stable across rediscovery.
+        """
+        if doi:
+            match = self.session.query(Paper).filter(Paper.doi == doi).first()
+            if match:
+                return match
+        if arxiv_id:
+            match = self.session.query(Paper).filter(Paper.arxiv_id == arxiv_id).first()
+            if match:
+                return match
+        if openalex_id:
+            match = self.session.query(Paper).filter(Paper.openalex_id == openalex_id).first()
+            if match:
+                return match
+        if s2_id:
+            match = self.session.query(Paper).filter(Paper.s2_id == s2_id).first()
+            if match:
+                return match
+        return None
+
     def _clean_str(self, val: Any) -> Any:
         if isinstance(val, str):
             return val.replace("\x00", "").replace("\u0000", "")
@@ -106,6 +141,13 @@ class LEARepository:
 
     def get_candidate_by_id(self, candidate_id: uuid.UUID) -> Optional[CandidatePaper]:
         return self.session.query(CandidatePaper).filter(CandidatePaper.id == candidate_id).first()
+
+    def get_candidate_for_run_and_paper(self, run_id: uuid.UUID, paper_id: uuid.UUID) -> Optional[CandidatePaper]:
+        return (
+            self.session.query(CandidatePaper)
+            .filter(CandidatePaper.run_id == run_id, CandidatePaper.paper_id == paper_id)
+            .first()
+        )
 
     # --- Text Chunks ---
     def add_chunk(
@@ -196,7 +238,12 @@ class LEARepository:
         data_availability: str,
         relationship_to_target: Optional[str] = None,
         data_location: Optional[str] = None,
-        data_availability_assessment: Optional[Dict[str, Any]] = None
+        data_availability_assessment: Optional[Dict[str, Any]] = None,
+        self_critique_verdict: Optional[str] = None,
+        self_critique_relevance_score: Optional[float] = None,
+        self_critique_grounding_score: Optional[float] = None,
+        self_critique_rationale: Optional[str] = None,
+        is_accepted: bool = True
     ) -> TechnicalSummaryModel:
         summary = TechnicalSummaryModel(
             run_id=run_id,
@@ -209,11 +256,19 @@ class LEARepository:
             data_availability=data_availability,
             data_location=data_location,
             data_availability_assessment=data_availability_assessment,
-            model_name=model_name
+            model_name=model_name,
+            self_critique_verdict=self._clean_str(self_critique_verdict),
+            self_critique_relevance_score=self_critique_relevance_score,
+            self_critique_grounding_score=self_critique_grounding_score,
+            self_critique_rationale=self._clean_str(self_critique_rationale),
+            is_accepted=is_accepted
         )
         self.session.add(summary)
         self.session.flush()
         return summary
 
-    def get_summaries_for_run(self, run_id: uuid.UUID) -> List[TechnicalSummaryModel]:
-        return self.session.query(TechnicalSummaryModel).filter(TechnicalSummaryModel.run_id == run_id).all()
+    def get_summaries_for_run(self, run_id: uuid.UUID, accepted_only: bool = False) -> List[TechnicalSummaryModel]:
+        query = self.session.query(TechnicalSummaryModel).filter(TechnicalSummaryModel.run_id == run_id)
+        if accepted_only:
+            query = query.filter(TechnicalSummaryModel.is_accepted == True)
+        return query.all()

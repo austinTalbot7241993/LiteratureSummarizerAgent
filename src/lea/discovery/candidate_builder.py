@@ -5,9 +5,46 @@ from lea.discovery.openalex import OpenAlexClient
 from lea.discovery.semantic_scholar import SemanticScholarClient
 from lea.discovery.exclusion import ExclusionEngine
 from lea.discovery.abstract_screener import AbstractScreener
-from lea.resolution.matcher import is_same_paper
+from lea.resolution.matcher import is_same_paper, fuzzy_title_match
 from lea.resolution.metadata_merge import merge_paper_metadata
 from lea.logging import logger
+
+KEYWORD_STOPWORDS = {
+    'with', 'from', 'this', 'that', 'using', 'study', 'analysis', 'data', 'model',
+    'results', 'effect', 'effects', 'group', 'patient', 'patients', 'journal', 'paper', 'article',
+    'when', 'where', 'which', 'into', 'under', 'over', 'such', 'been', 'have', 'were', 'their', 'than',
+    'small', 'broad', 'class', 'methods', 'including', 'standard', 'number', 'positive', 'these', 'also',
+    'both', 'each', 'more', 'most', 'other', 'some', 'while', 'well', 'many', 'across', 'based', 'novel'
+}
+
+
+def extract_search_keywords(text: str, max_terms: int = 10) -> str:
+    """Extracts a short, distinct list of domain keywords from text for use
+    as an OpenAlex/Semantic Scholar search query.
+
+    OpenAlex's `search=` parameter is an AND-of-all-terms full-text filter,
+    not a fuzzy relevance ranking (confirmed via its own `x_query.oql` debug
+    field: "works where full text has (all these terms)") -- so a long,
+    verbose query (e.g. the full title + a raw slice of the abstract) either
+    matches nothing or falls back to seemingly-arbitrary noise, and a title
+    containing the paper's own coined name (e.g. a novel tool's name) is
+    *guaranteed* to match zero other papers, since by definition no prior
+    work uses that name. A short list of generic domain terms is far more
+    likely to co-occur with genuinely related papers.
+    """
+    words = re.findall(r"[A-Za-z][A-Za-z\-]{3,}", text)
+    seen: List[str] = []
+    seen_lower = set()
+    for w in words:
+        wl = w.lower()
+        if wl in KEYWORD_STOPWORDS or wl in seen_lower:
+            continue
+        seen.append(w)
+        seen_lower.add(wl)
+        if len(seen) >= max_terms:
+            break
+    return " ".join(seen)
+
 
 class CandidateBuilder:
     def __init__(
@@ -45,25 +82,78 @@ class CandidateBuilder:
         if not oa_id and (doi or arxiv_id):
             work = await self.openalex_client.get_work(doi=doi, arxiv_id=arxiv_id)
             if work:
-                oa_id = work.get("openalex_id")
+                # Sanity-check the resolved work's title against our own
+                # extracted title before trusting its identity. A DOI/arXiv ID
+                # extracted from a PDF's header (whether via GROBID's header
+                # consolidation cross-referencing CrossRef, or GROBID's raw
+                # header model, or a naive regex match against the body text)
+                # can be flatly wrong -- confirmed live against a real
+                # anonymized preprint, where GROBID non-deterministically
+                # resolved it to two DIFFERENT unrelated papers' DOIs across
+                # separate calls. Trusting a wrong DOI here doesn't just add
+                # noise: it makes the ENTIRE discovery pass search that other
+                # paper's citation neighborhood instead of the seed paper's,
+                # which is far worse than finding no candidates at all.
+                if title and not fuzzy_title_match(
+                    {"title": title, "publication_year": input_paper_meta.get("publication_year")},
+                    work,
+                    similarity_threshold=0.85
+                ):
+                    logger.warning(
+                        f"Discarding resolved OpenAlex identity for doi={doi!r} arxiv_id={arxiv_id!r}: "
+                        f"resolved work title {work.get('title')!r} does not match the input paper's own "
+                        f"title {title!r}. Treating doi/arxiv_id as unreliable for this run rather than "
+                        f"risk searching the wrong paper's citation neighborhood."
+                    )
+                    doi = None
+                    arxiv_id = None
+                else:
+                    oa_id = work.get("openalex_id")
 
-        # Fetch OpenAlex candidates via related_to AND title search
+        discovery_cfg = getattr(self.config, "discovery", None)
+        openalex_limit = getattr(discovery_cfg, "openalex_limit", 100) if discovery_cfg else 100
+        s2_limit = getattr(discovery_cfg, "semantic_scholar_limit", 100) if discovery_cfg else 100
+
+        # When there is no citation-graph anchor at all (no OpenAlex ID
+        # resolved, e.g. a brand-new/anonymized preprint with no DOI, arXiv
+        # ID, or citations yet), a bare title search is the ONLY discovery
+        # signal available -- and confirmed live, the full title alone (which
+        # usually contains the paper's own coined name/method, guaranteed to
+        # match zero other papers under OpenAlex's AND-of-all-terms search)
+        # surfaces generic globally-popular "hub" papers instead of real
+        # neighbors. Build a short domain-keyword query from the abstract
+        # instead in that situation, since the abstract describes the
+        # problem using established terminology other papers actually share.
+        abstract = input_paper_meta.get("abstract") or ""
+        search_query = title
+        if not oa_id and abstract:
+            keyword_query = extract_search_keywords(abstract, max_terms=10)
+            if keyword_query:
+                search_query = keyword_query
+
+        # Fetch OpenAlex candidates via related_to AND title/keyword search
         oa_candidates = []
         if oa_id:
             logger.info(f"Fetching OpenAlex related candidates for work {oa_id}...")
-            oa_candidates = await self.openalex_client.find_related_candidates(oa_id, limit=100)
+            oa_candidates = await self.openalex_client.find_related_candidates(oa_id, limit=openalex_limit)
 
-        if title:
-            logger.info(f"Fetching OpenAlex search candidates for query '{title[:60]}...'")
-            search_cands = await self.openalex_client.search_candidates(title, limit=50)
+        if search_query:
+            logger.info(f"Fetching OpenAlex search candidates for query '{search_query[:60]}...'")
+            search_cands = await self.openalex_client.search_candidates(search_query, limit=openalex_limit)
             oa_candidates.extend(search_cands)
 
-        # Fetch from Semantic Scholar
+        # Fetch from Semantic Scholar: prefer a recommendations lookup keyed
+        # by a stable identifier, but fall back to a plain keyword search
+        # when none exists -- without this, S2 contributed nothing at all to
+        # discovery for a paper with no DOI/arXiv/S2 ID.
         s2_candidates = []
         s2_id = input_paper_meta.get("s2_id") or doi or arxiv_id
         if s2_id:
             logger.info(f"Fetching Semantic Scholar recommendations for paper {s2_id}...")
-            s2_candidates = await self.semantic_scholar_client.get_paper_recommendations(s2_id, limit=100)
+            s2_candidates = await self.semantic_scholar_client.get_paper_recommendations(s2_id, limit=s2_limit)
+        elif search_query:
+            logger.info(f"No stable identifier for Semantic Scholar; falling back to keyword search for '{search_query[:60]}...'")
+            s2_candidates = await self.semantic_scholar_client.search_papers(search_query, limit=s2_limit)
 
         # Merge candidate pools into unified deduplicated list with source ranks
         unified_candidates: List[Dict[str, Any]] = []
@@ -151,11 +241,12 @@ class CandidateBuilder:
             c["domain_relevance"] = rel_score
             c["rrf_score"] = score * (1.0 + 5.0 * rel_score)
 
-        # Filter out low relevance candidates (cosine similarity < 0.30)
-        relevant_pool = [c for c in filtered_candidates if c.get("domain_relevance", 0.0) >= 0.30]
-        if len(relevant_pool) >= final_candidate_limit:
-            filtered_candidates = relevant_pool
-
+        # NOTE: domain_relevance is deliberately NOT used as a hard drop threshold here.
+        # A single dense-embedding cosine score against a short title+abstract is noisy
+        # and was previously discarding otherwise-relevant candidates before the abstract
+        # screener ever saw them. It already factors into rrf_score as a re-rank boost
+        # above; the abstract screening stage (LLM or embedding-based) is the intended
+        # relevance gate, so let it operate on the full deduplicated/excluded pool.
         filtered_candidates.sort(key=lambda x: x.get("rrf_score", 0.0), reverse=True)
 
         # Check screening configuration and overrides
@@ -170,7 +261,11 @@ class CandidateBuilder:
         method = screening_method or (getattr(screen_config, "method", "llm") if screen_config else "llm")
         pre_limit = getattr(screen_config, "pre_screening_limit", 50) if screen_config else 50
         min_score = min_relevance_score if min_relevance_score is not None else (getattr(screen_config, "min_relevance_score", 6.0) if screen_config else 6.0)
-        max_candidates = getattr(screen_config, "max_screened_candidates", final_candidate_limit) if screen_config else final_candidate_limit
+        # max_screened_candidates only narrows the pool when explicitly configured;
+        # otherwise it defers to final_candidate_limit so screening doesn't silently
+        # shrink the pool the downstream quota loop draws from.
+        configured_max = getattr(screen_config, "max_screened_candidates", None) if screen_config else None
+        max_candidates = configured_max if configured_max is not None else final_candidate_limit
 
         if do_screening:
             logger.info(f"Executing abstract screening stage (method='{method}', min_score={min_score}, pre_limit={pre_limit})...")

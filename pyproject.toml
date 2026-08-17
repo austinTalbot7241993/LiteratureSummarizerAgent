@@ -52,3 +52,6 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "gpu: requires a CUDA GPU (and, for some tests, network access) to exercise real inference end-to-end; slower than the mocked unit/integration suite. Run just these with `pytest -m gpu`, or exclude them with `pytest -m \"not gpu\"`.",
+]
