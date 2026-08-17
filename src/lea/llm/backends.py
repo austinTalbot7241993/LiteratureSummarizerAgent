@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 from lea.llm.schemas import (
     TechnicalSummary,
     DataAvailabilityAssessment,
+    SelfCritiqueAssessment,
     PaperAvailabilityStatus,
     DatasetAvailability,
     DatasetAvailabilityStatus,
@@ -71,6 +72,9 @@ class BaseLLMBackend:
         raise NotImplementedError
 
     def generate_abstract_relevance(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def generate_critique(self, system_prompt: str, user_prompt: str) -> SelfCritiqueAssessment:
         raise NotImplementedError
 
 
@@ -254,6 +258,25 @@ class MockLLMBackend(BaseLLMBackend):
             "reasoning": "The candidate paper directly addresses the scientific methodology of the seed paper."
         }
 
+    def generate_critique(self, system_prompt: str, user_prompt: str) -> SelfCritiqueAssessment:
+        if self.preset == "malformed":
+            raise SummaryValidationError("Mock backend configured to simulate malformed JSON output.")
+        if self.preset == "rejected":
+            return SelfCritiqueAssessment(
+                is_relevant_to_seed_topic=False,
+                relevance_score=3.0,
+                factual_grounding_score=4.0,
+                critique_rationale="Candidate paper content is off-topic relative to seed paper research problem.",
+                verdict="rejected"
+            )
+        return SelfCritiqueAssessment(
+            is_relevant_to_seed_topic=True,
+            relevance_score=8.5,
+            factual_grounding_score=9.0,
+            critique_rationale="Summary claims are strictly grounded in retrieved full-text chunks and highly relevant to seed topic.",
+            verdict="accepted"
+        )
+
 
 class TransformersPeftBackend(BaseLLMBackend):
     def __init__(
@@ -347,18 +370,24 @@ class TransformersPeftBackend(BaseLLMBackend):
         text_input = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self._tokenizer(text_input, return_tensors="pt").to("cuda")
 
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=600,
-                do_sample=False
-            )
+        try:
+            with torch.inference_mode():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=500,
+                    do_sample=False
+                )
 
-        output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
-        raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
-        del inputs, outputs
-        torch.cuda.empty_cache()
-        gc.collect()
+            output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+            raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        finally:
+            if "inputs" in locals():
+                del inputs
+            if "outputs" in locals():
+                del outputs
+            gc.collect()
+            torch.cuda.empty_cache()
+
         logger.info(f"Raw Technical Summary LLM Output ({len(raw_response)} chars):\n{raw_response}")
 
         match_title = re.search(r"Paper Title:\s*(.+)", user_prompt)
@@ -400,7 +429,6 @@ class TransformersPeftBackend(BaseLLMBackend):
         if len(words) > 300:
             parsed_fields["paragraph_summary"] = " ".join(words[:290])
 
-        # Note: data_availability will be provided via dedicated generate_data_availability call
         parsed_fields["data_availability"] = PaperAvailabilityStatus.UNCLEAR
 
         return TechnicalSummary(**parsed_fields)
@@ -423,22 +451,28 @@ class TransformersPeftBackend(BaseLLMBackend):
         text_input = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self._tokenizer(text_input, return_tensors="pt").to("cuda")
 
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=800,
-                do_sample=False
-            )
+        try:
+            with torch.inference_mode():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=400,
+                    do_sample=False
+                )
 
-        output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
-        raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
-        del inputs, outputs
-        torch.cuda.empty_cache()
+            output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+            raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        finally:
+            if "inputs" in locals():
+                del inputs
+            if "outputs" in locals():
+                del outputs
+            gc.collect()
+            torch.cuda.empty_cache()
+
         logger.info(f"Raw Data Availability LLM Output ({len(raw_response)} chars):\n{raw_response}")
 
         cleaned = clean_json_response(raw_response)
         
-        # 1st attempt: parse JSON and validate Pydantic & quotes
         try:
             data = json.loads(cleaned)
             assessment = DataAvailabilityAssessment(**data)
@@ -447,7 +481,6 @@ class TransformersPeftBackend(BaseLLMBackend):
         except Exception as exc1:
             logger.warning(f"Data availability extraction validation failed on initial attempt: {exc1}. Attempting 1-step repair retry...")
 
-            # 1-step repair retry request
             repair_user_prompt = (
                 f"{trimmed_user_prompt}\n\n"
                 f"CRITICAL REPAIR DIRECTIVE: Your previous output was invalid.\n"
@@ -468,18 +501,24 @@ class TransformersPeftBackend(BaseLLMBackend):
             repair_input = self._tokenizer.apply_chat_template(repair_messages, tokenize=False, add_generation_prompt=True)
             repair_inputs = self._tokenizer(repair_input, return_tensors="pt").to("cuda")
 
-            with torch.no_grad():
-                repair_outputs = self._model.generate(
-                    **repair_inputs,
-                    max_new_tokens=800,
-                    do_sample=False
-                )
+            try:
+                with torch.inference_mode():
+                    repair_outputs = self._model.generate(
+                        **repair_inputs,
+                        max_new_tokens=400,
+                        do_sample=False
+                    )
 
-            repair_tokens = repair_outputs[0][repair_inputs["input_ids"].shape[1]:]
-            repair_response = self._tokenizer.decode(repair_tokens, skip_special_tokens=True)
-            del repair_inputs, repair_outputs
-            torch.cuda.empty_cache()
-            gc.collect()
+                repair_tokens = repair_outputs[0][repair_inputs["input_ids"].shape[1]:]
+                repair_response = self._tokenizer.decode(repair_tokens, skip_special_tokens=True)
+            finally:
+                if "repair_inputs" in locals():
+                    del repair_inputs
+                if "repair_outputs" in locals():
+                    del repair_outputs
+                gc.collect()
+                torch.cuda.empty_cache()
+
             logger.info(f"Raw Repair LLM Output ({len(repair_response)} chars):\n{repair_response}")
 
             cleaned_repair = clean_json_response(repair_response)
@@ -505,21 +544,60 @@ class TransformersPeftBackend(BaseLLMBackend):
         text_input = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self._tokenizer(text_input, return_tensors="pt").to("cuda")
 
-        with torch.no_grad():
-            outputs = self._model.generate(
-                **inputs,
-                max_new_tokens=300,
-                do_sample=False
-            )
+        try:
+            with torch.inference_mode():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=250,
+                    do_sample=False
+                )
 
-        output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
-        raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
-        del inputs, outputs
-        torch.cuda.empty_cache()
-        gc.collect()
+            output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+            raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        finally:
+            if "inputs" in locals():
+                del inputs
+            if "outputs" in locals():
+                del outputs
+            gc.collect()
+            torch.cuda.empty_cache()
 
         cleaned = clean_json_response(raw_response)
         data = json.loads(cleaned)
         if isinstance(data, dict) and "relevance_score" in data:
             return data
         raise ValueError(f"Invalid abstract relevance JSON response: {raw_response[:200]}")
+
+    def generate_critique(self, system_prompt: str, user_prompt: str) -> SelfCritiqueAssessment:
+        self._load_model()
+        import torch
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        text_input = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = self._tokenizer(text_input, return_tensors="pt").to("cuda")
+
+        try:
+            with torch.inference_mode():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=300,
+                    do_sample=False
+                )
+
+            output_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+            raw_response = self._tokenizer.decode(output_tokens, skip_special_tokens=True)
+        finally:
+            if "inputs" in locals():
+                del inputs
+            if "outputs" in locals():
+                del outputs
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        cleaned = clean_json_response(raw_response)
+        data = json.loads(cleaned)
+        return SelfCritiqueAssessment(**data)

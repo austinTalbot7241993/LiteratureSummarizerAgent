@@ -5,6 +5,10 @@ from typing import Dict, Any, List, Optional
 from lea.logging import logger
 from lea.resolution.identifiers import normalize_doi, normalize_arxiv, normalize_openalex_id
 
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_RETRIES = 3
+BASE_BACKOFF_SECONDS = 1.5
+
 class OpenAlexClient:
     def __init__(self, api_key: Optional[str] = None, rate_limit_rps: float = 5.0, timeout: float = 30.0):
         self.api_key = api_key
@@ -17,6 +21,37 @@ class OpenAlexClient:
         if elapsed < self.rate_limit_delay:
             await asyncio.sleep(self.rate_limit_delay - elapsed)
         self.last_request_time = time.time()
+
+    async def _get_with_retry(self, client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+        """GET with bounded exponential-backoff retry on 429/5xx.
+
+        Every call site previously branched only on `status_code == 200`,
+        so a transient rate-limit or server error was treated identically
+        to "confirmed zero results" -- a single 429 silently produced "no
+        candidates" for the whole discovery run instead of being retried
+        (confirmed live: OpenAlex/Semantic Scholar both returned 429 mid-run
+        with no OPENALEX_API_KEY/SEMANTIC_SCHOLAR_API_KEY configured, which
+        put every request in the strictest unauthenticated tier). Honors a
+        `Retry-After` header when the server provides one.
+        """
+        res = None
+        for attempt in range(MAX_RETRIES + 1):
+            res = await client.get(url, **kwargs)
+            if res.status_code not in RETRYABLE_STATUS_CODES:
+                return res
+            if attempt == MAX_RETRIES:
+                break
+            retry_after = res.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after else BASE_BACKOFF_SECONDS * (2 ** attempt)
+            except ValueError:
+                delay = BASE_BACKOFF_SECONDS * (2 ** attempt)
+            logger.warning(
+                f"OpenAlex request to {url} returned {res.status_code}; "
+                f"retrying in {delay:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})"
+            )
+            await asyncio.sleep(delay)
+        return res
 
     async def get_work(self, doi: Optional[str] = None, arxiv_id: Optional[str] = None, openalex_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         await self._rate_limit()
@@ -38,7 +73,7 @@ class OpenAlexClient:
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                res = await client.get(url, params=params)
+                res = await self._get_with_retry(client, url, params=params)
                 if res.status_code == 200:
                     return self._parse_work(res.json())
                 return None
@@ -65,7 +100,7 @@ class OpenAlexClient:
             await self._rate_limit()
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    res = await client.get(url)
+                    res = await self._get_with_retry(client, url)
                     if res.status_code == 200:
                         items = res.json().get("results", [])
                         for item in items:
@@ -80,14 +115,25 @@ class OpenAlexClient:
     async def find_related_candidates(self, work_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         await self._rate_limit()
         clean_id = work_id.split("/")[-1]
-        url = f"https://api.openalex.org/works?filter=related_to:{clean_id}&per-page={min(limit, 100)}"
-        params = {}
+        # NOTE: params must carry ALL query args, including `filter`/`per-page`
+        # -- passing a `params=` dict to httpx alongside a URL that already
+        # has its own embedded "?filter=...&per-page=..." query string
+        # silently DISCARDS that embedded query entirely (confirmed live: this
+        # was sending a completely unfiltered request to /works, returning
+        # the same fixed ~25-paper slice of the whole OpenAlex corpus
+        # regardless of work_id -- verified by requesting "related to
+        # Attention Is All You Need" and getting back papers on radiation-
+        # resistant cameras and RNA-seq analysis). This was the dominant root
+        # cause of "irrelevant candidates" appearing for every single
+        # discovery run all session, independent of any screening/critique
+        # logic downstream.
+        params = {"filter": f"related_to:{clean_id}", "per-page": min(limit, 100)}
         if self.api_key:
             params["api_key"] = self.api_key
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                res = await client.get(url, params=params)
+                res = await self._get_with_retry(client, "https://api.openalex.org/works", params=params)
                 if res.status_code == 200:
                     results = res.json().get("results", [])
                     return [self._parse_work(w) for w in results]
@@ -97,19 +143,60 @@ class OpenAlexClient:
             return []
 
     async def search_candidates(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Plain-text search. NOTE: OpenAlex's `search=` parameter is an
+        AND-of-all-terms full-text filter, not fuzzy relevance ranking
+        (confirmed via its own `x_query.oql` debug field: "works where full
+        text has (all these terms)"). A multi-word query that includes even
+        one narrow/rare term (e.g. a specific method name like "SuSiE-RSS" or
+        "TWAS") can drive the match count to exactly zero -- and, confirmed
+        live, OpenAlex then silently returns an unrelated "trending/popular"
+        fallback result set instead of an empty one, which looks
+        indistinguishable from a real (bad) match unless the count is
+        checked. If the initial query matches nothing, progressively drop
+        trailing terms and retry rather than accept that fallback.
+        """
+        terms = query.split()
+        for attempt in range(3):
+            if not terms:
+                return []
+
+            result = await self._search_once(" ".join(terms), limit)
+            if result is not None:
+                return result
+
+            # Zero real matches at this specificity -- drop the last
+            # (least essential, in extract_search_keywords' extraction
+            # order) term(s) and try a broader query instead of accepting
+            # OpenAlex's fallback result set for a zero-match query.
+            shortened = terms[:-3] if len(terms) > 3 else terms[:-1]
+            if len(shortened) == len(terms):
+                break
+            terms = shortened
+
+        return []
+
+    async def _search_once(self, query: str, limit: int) -> Optional[List[Dict[str, Any]]]:
+        """Runs a single search query. Returns None (not an empty list) when
+        OpenAlex reports zero real matches, so the caller can distinguish
+        "genuinely no results for this broader query" from "this specific
+        query matched nothing and should be relaxed."
+        """
         await self._rate_limit()
-        import urllib.parse
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://api.openalex.org/works?search={encoded_query}&per-page={min(limit, 50)}"
-        params = {}
+        # See the identical note in find_related_candidates: params must
+        # carry the `search`/`per-page` args directly, not be embedded in the
+        # URL string alongside a separate params= dict.
+        params = {"search": query, "per-page": min(limit, 50)}
         if self.api_key:
             params["api_key"] = self.api_key
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                res = await client.get(url, params=params)
+                res = await self._get_with_retry(client, "https://api.openalex.org/works", params=params)
                 if res.status_code == 200:
-                    results = res.json().get("results", [])
+                    data = res.json()
+                    if data.get("meta", {}).get("count", 0) == 0:
+                        return None
+                    results = data.get("results", [])
                     return [self._parse_work(w) for w in results]
                 return []
         except Exception as exc:

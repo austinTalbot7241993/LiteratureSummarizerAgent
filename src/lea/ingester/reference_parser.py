@@ -6,8 +6,8 @@ from lea.exceptions import IngestError, BibliographyExtractionError
 from lea.logging import logger
 
 class ReferenceParser:
-    def __init__(self, grobid_url: str = "http://localhost:8070", config: Any = None):
-        self.grobid_client = GrobidClient(base_url=grobid_url)
+    def __init__(self, grobid_url: str = "http://localhost:8070", config: Any = None, grobid_timeout: float = 120.0):
+        self.grobid_client = GrobidClient(base_url=grobid_url, timeout=grobid_timeout)
         self.config = config
 
     async def extract_references(

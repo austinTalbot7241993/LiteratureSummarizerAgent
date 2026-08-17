@@ -27,6 +27,7 @@ SUMMARY_USER_PROMPT_TEMPLATE = """Paper Title: {title}
 Authors: {authors}
 Publication Year: {year}
 Target Input Paper: {target_title}
+Target Input Paper Abstract: {target_abstract}
 
 REQUIRED FORMAT: You MUST format your response into the 5 required labeled section headers below:
 PROBLEM FORMULATION:

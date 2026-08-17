@@ -61,7 +61,12 @@ def create_tables(engine=None):
             ("relationship_to_target", "TEXT"),
             ("data_availability", "VARCHAR(50)"),
             ("data_location", "TEXT"),
-            ("data_availability_assessment", "JSONB" if not is_sqlite else "JSON")
+            ("data_availability_assessment", "JSONB" if not is_sqlite else "JSON"),
+            ("self_critique_verdict", "VARCHAR(20)"),
+            ("self_critique_relevance_score", "FLOAT"),
+            ("self_critique_grounding_score", "FLOAT"),
+            ("self_critique_rationale", "TEXT"),
+            ("is_accepted", "BOOLEAN")
         ]
         chunk_columns = [
             ("section_title", "TEXT"),

@@ -28,6 +28,7 @@ Direct extension of the target input paper methodology for larger population coh
             authors="Test Authors",
             year=2024,
             target_title="Target Input Paper",
+            target_abstract="Sample target abstract.",
             context_text="Sample paper text."
         )
     )
